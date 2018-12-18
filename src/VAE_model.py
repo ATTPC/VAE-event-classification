@@ -54,7 +54,7 @@ def sampling(args):
 
 kernel_size = 4
 filters = 20
-latent_dim = 10
+latent_dim = 100
 num_layers = 2
 
 in_layer = Input(shape=(128, 128, 1))
