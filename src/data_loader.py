@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import h5py
 
-
 def DataLoader(file_location):
     fileobj = h5py.File(file_location, "r")
     X_t = fileobj["train_features"]
