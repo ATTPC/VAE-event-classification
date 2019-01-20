@@ -1,137 +1,134 @@
 #!/usr/bin/env python3
 
-from data_loader import DataLoader
+import sys
 
 from keras import backend as K
 import keras as ker
-
-from keras.models import Sequential, Model
-from keras.layers import Dense, Conv2D, Flatten, MaxPool2D, Reshape
-from keras.layers import Conv2DTranspose
-from keras.layers import ZeroPadding2D, ZeroPadding3D
-from keras.layers import Input, Lambda
-
-from keras.losses import mse, binary_crossentropy
-
-import keras.regularizers as reg
-import keras.optimizers as opt
+import tensorflow as tf
 
 import matplotlib.pyplot as plt
+import numpy as np
+
+#tf.enable_eager_execution()
+
+# %%
+
+H, W = 128, 128 #image dimensions
+n_pixels = H*W #number of pixels in image
+kernel_size = [3, 3]
+dec_size = 256
+T = 2
+batch_size = 100
+input_size = (batch_size, H, W, 1)
+
+train_iters = 2
+eta = 1e-3
+eps = 1e-8
+
+read_size = 2*n_pixels
+write_size = n_pixels
+latent_dim = 20
+
+DO_SHARE=None
+
+# network variables
 
 
-file_location = "/home/solli-comphys/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"
-X_train, y_train, X_test, y_test = DataLoader(file_location)
+tf.flags.DEFINE_boolean("read_attn", False, "enable attention for reader")
+tf.flags.DEFINE_boolean("write_attn", False, "enable attention for writer")
+FLAGS = tf.flags.FLAGS
+
+e = tf.random_normal((batch_size, latent_dim), mean=0, stddev=1)
+x = tf.placeholder(tf.float32, shape=(batch_size, H, W, 1))
+
+encoder = tf.contrib.rnn.ConvLSTMCell(
+            conv_ndims=2,
+            input_shape=[H, W, 1],
+            output_channels=1,
+            kernel_shape=kernel_size
+            )
+
+decoder = tf.contrib.rnn.LSTMCell(dec_size, state_is_tuple=True)
 
 
-def rgb2gray(rgb):
+# network operations
 
-    r, g, b = rgb[:, :, :, 0], rgb[:, :, :, 1], rgb[:, :, :, 2]
-    gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
+def linear_conv(x, output_dim):
+    w = tf.get_variable("w", [128, 128, output_dim])
+    b = tf.get_variable(
+            "b",
+            [output_dim],
+            initializer=tf.constant_initializer(0.0))
+    return tf.reshape(tf.tensordot(x, w, [[1, 2], [0, 1]]), (100, 20)) + b
 
-    return gray
+def linear(x, output_dim):
+    w = tf.get_variable("w", [x.get_shape()[1], output_dim])
+    b = tf.get_variable(
+            "b",
+            [output_dim],
+            initializer=tf.constant_initializer(0.0))
+    return tf.matmul(x,w)+b
+
+def read(x, x_hat, h_dec_prev):
+    return tf.concat([x, x_hat], 3)
 
 
-X_train = rgb2gray(X_train)/255
-X_test = rgb2gray(X_test)/255
+def encode(state, input):
+    with tf.variable_scope("encoder", reuse=DO_SHARE):
+        return encoder(input, state)
 
-X_train = X_train.reshape(X_train.shape + (1,))
-X_test = X_test.reshape(X_test.shape + (1,))
 
-def sampling(args):
-    """Reparameterization trick by sampling fr an isotropic unit Gaussian.
-    # Arguments:
-        args (tensor): mean and log of variance of Q(z|X)
-    # Returns:
-        z (tensor): sampled latent vector
+def sample(h_enc):
     """
+    samples z_t from NormalDistribution(mu, sigma)
+    """
+    with tf.variable_scope("mu", reuse=DO_SHARE):
+        mu = linear_conv(h_enc, latent_dim)
+    with tf.variable_scope("sigma", reuse=DO_SHARE):
+        logsigma = linear_conv(h_enc, latent_dim)
+        sigma = tf.exp(logsigma)
 
-    z_mean, z_log_var = args
-    batch = K.shape(z_mean)[0]
-    dim = K.int_shape(z_mean)[1]
-    # by default, random_normal has mean=0 and std=1.0
-    epsilon = K.random_normal(shape=(batch, dim))
-    return z_mean + K.exp(0.5 * z_log_var) * epsilon
+    return (mu + sigma*e, mu, logsigma, sigma)
 
-kernel_size = 4
-filters = 20
-latent_dim = 100
-num_layers = 2
-
-in_layer = Input(shape=(128, 128, 1))
-h1 = in_layer
-shape = K.int_shape(h1)
-
-for i in range(1, num_layers+1):
-    filters *= 2
-    h1 = Conv2D(
-            filters,
-            kernel_size,
-            activation="relu",
-            strides=2,
-            padding="same",
-            use_bias=True,
-            kernel_regularizer=reg.l2(0.01),
-            bias_regularizer=reg.l2(0.01)
-            )(h1)
+def decode(state, input):
+    with tf.variable_scope("decoder", reuse=DO_SHARE):
+        return decoder(input, state)
 
 
-shape = K.int_shape(h1)
-h1 = Flatten()(h1)
+def write(h_dec):
+    with tf.variable_scope("write", reuse=DO_SHARE):
+        return linear(h_dec, n_pixels)
 
-h1 = Dense(16, activation='relu')(h1)
-mean = Dense(latent_dim)(h1)
-var = Dense(latent_dim)(h1)
 
-sample = Lambda(sampling, output_shape=(latent_dim,))([mean, var])
+canvas_seq = [0]*T
+mus, logsigmas, sigmas = [0]*T, [0]*T, [0]*T
 
-encoder = Model(in_layer, [mean, var, sample], name="encoder")
-encoder.summary()
+#initial states
+h_dec_prev = tf.zeros(input_size)
+enc_state = encoder.zero_state(batch_size, tf.float32)
+dec_state = decoder.zero_state(batch_size, tf.float32)
+
+for t in range(T):
+    c_prev = tf.zeros(input_size) if t == 0 else canvas_seq[t-1]
+    x_hat = x - tf.sigmoid(c_prev)
+    r = read(x, x_hat, h_dec_prev)
+    h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 3))
+    z, mus[t], logsigmas[t], sigmas[t] = sample(h_enc)
+    h_dec, dec_state = decode(dec_state, z)
+    canvas_seq[t] = c_prev+tf.reshape(write(h_dec), (100, 128, 128, 1))
+    DO_SHARE = True
+
+
+sys.exit()
 
 # %%
-latent_inputs = Input(shape=(latent_dim,), name='z_sampling')
-de1 = Dense(
-        shape[1] * shape[2] * shape[3],
-        activation='relu')(latent_inputs)
-
-de1 = Reshape((shape[1], shape[2], shape[3]))(de1)
-
-for i in reversed(range(1, num_layers+1)):
-    de1 = Conv2DTranspose(
-                        filters=filters,
-                        kernel_size=kernel_size,
-                        activation='relu',
-                        strides=2,
-                        padding='same',
-                        use_bias=True,
-                        kernel_regularizer=reg.l2(0.01),
-                        bias_regularizer=reg.l2(0.01)
-                        )(de1)
-    filters //= 2
-
-outputs = Conv2DTranspose(filters=1,
-                          kernel_size=kernel_size,
-                          activation='sigmoid',
-                          padding='same',
-                          use_bias=True,
-                          kernel_regularizer=reg.l2(0.01),
-                          bias_regularizer=reg.l2(0.01),
-                          name='decoder_output')(de1)
-decoder = Model(input=latent_inputs, output=outputs)
-
-outputs = decoder(encoder(in_layer)[2])
-vae = Model(in_layer, outputs, name='vae')
 
 
-def vae_loss(y_true, y_pred):
-    xent_loss = binary_crossentropy(K.flatten(y_true), K.flatten(y_pred)) * 784
-    kl_loss = - 0.5 * K.sum(1 + var - K.square(mean) - K.exp(var), axis=-1)
-    vae_loss = K.mean(xent_loss + kl_loss)
-    return vae_loss
+t_fn = "/home/solli-comphys/github/VAE-event-classification/data/processed/train.npy"
+te_fn = "/home/solli-comphys/github/VAE-event-classification/data/processed/test.npy"
 
-
-vae.compile(optimizer="adam", loss=[vae_loss])
-
-# %%
+X_train = np.load(t_fn)
+X_test = np.load(te_fn)
 
 earlystop = ker.callbacks.EarlyStopping(
                             monitor='val_loss',
@@ -142,19 +139,14 @@ earlystop = ker.callbacks.EarlyStopping(
                             restore_best_weights=True
                               )
 
-tensorboard = ker.callbacks.TensorBoard(
-                            log_dir='./Graph',
-                            write_graph=True,
-                            histogram_freq=0,
-                            write_images=True)
 
 vae.fit(
         X_train,
         X_train,
         validation_data=(X_test, X_test),
         epochs=20,
-        batch_size=100,
-        callbacks=[earlystop, tensorboard]
+        batch_size=50,
+        callbacks=[earlystop, ]
     )
 
 
