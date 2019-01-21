@@ -16,19 +16,19 @@ import numpy as np
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
 kernel_size = [2, 2]
-dec_size = 150#00
-enc_size = 150#00
+dec_size = 350  # 00
+enc_size = 350  # 00
 T = 10
 batch_size = 100
 input_size = (batch_size, H, W, 1)
 
-train_iters = 2000
+train_iters = 200
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 500
+latent_dim = 200
 
 DO_SHARE = None
 
