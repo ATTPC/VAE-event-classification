@@ -151,7 +151,7 @@ def binary_crossentropy(t, o):
     return -(t*tf.log(o+eps) + (1.0-t)*tf.log(1.0-o+eps))
 
 
-x_recons = canvas_seq[-1]
+x_recons = tf.sigmoid(canvas_seq[-1])
 # Lx = tf.reduce_sum(binary_crossentropy(longform(x), x_recons), 1)
 Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
 
