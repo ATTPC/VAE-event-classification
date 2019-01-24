@@ -4,8 +4,9 @@ from data_loader import DataLoader
 from skimage import util
 import numpy as np
 
-file_location = "/home/solli-comphys/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"
+file_location = "/Users/solli/Documents/github/VAE-event-classification/data/images.h5"
 X_train, y_train, X_test, y_test = DataLoader(file_location)
+
 
 def rgb2gray(rgb):
 
@@ -13,6 +14,7 @@ def rgb2gray(rgb):
     gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
 
     return gray
+
 
 X_train = rgb2gray(X_train)/255
 for i, x in enumerate(X_train):
@@ -36,8 +38,8 @@ X_test[threshhold_indices_test] = 0
 X_train = X_train.reshape(X_train.shape + (1,))
 X_test = X_test.reshape(X_test.shape + (1,))
 
-t_fn = "/home/solli-comphys/github/VAE-event-classification/data/processed/train.npy"
-te_fn = "/home/solli-comphys/github/VAE-event-classification/data/processed/test.npy"
+t_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/train.npy"
+te_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/test.npy"
 
 np.save(t_fn, X_train)
 np.save(te_fn, X_test)
