@@ -12,23 +12,24 @@ import numpy as np
 # tf.enable_eager_execution()
 
 # %%
+test_mode = False
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
 kernel_size = [2, 2]
-dec_size = 350  # 00
-enc_size = 350  # 00
-T = 10
+dec_size = 3 if test_mode else 150  # 00
+enc_size = 3 if test_mode else 150  # 00
+T = 2 if test_mode else 10
 batch_size = 100
 input_size = (batch_size, H, W, 1)
 
-train_iters = 200
+epochs = 20
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 200
+latent_dim = 2 if test_mode else 100
 
 DO_SHARE = None
 
@@ -47,16 +48,16 @@ x = tf.placeholder(tf.float32, shape=(batch_size, n_pixels))
 #             )
 
 encoder = tf.nn.rnn_cell.LSTMCell(
-                enc_size,
-                state_is_tuple=True,
-                activity_regularizer=tf.contrib.layers.l2_regularizer(0.001)
-                )
+    enc_size,
+    state_is_tuple=True,
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001)
+)
 
 decoder = tf.nn.rnn_cell.LSTMCell(
-                dec_size,
-                state_is_tuple=True,
-                activity_regularizer=tf.contrib.layers.l2_regularizer(0.001)
-                )
+    dec_size,
+    state_is_tuple=True,
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001)
+)
 
 print(encoder.output_size, decoder.output_size)
 
@@ -72,18 +73,18 @@ def longform(x):
 def linear_conv(x, output_dim):
     w = tf.get_variable("w", [128, 128, output_dim])
     b = tf.get_variable(
-            "b",
-            [output_dim],
-            initializer=tf.constant_initializer(0.0))
+        "b",
+        [output_dim],
+        initializer=tf.constant_initializer(0.0))
     return tf.reshape(tf.tensordot(x, w, [[1, 2], [0, 1]]), (100, 20)) + b
 
 
 def linear(x, output_dim):
     w = tf.get_variable("w", [x.get_shape()[1], output_dim])
     b = tf.get_variable(
-            "b",
-            [output_dim],
-            initializer=tf.constant_initializer(0.0))
+        "b",
+        [output_dim],
+        initializer=tf.constant_initializer(0.0))
     return tf.matmul(x, w) + b
 
 
@@ -167,7 +168,7 @@ for t in range(T):
 KL = tf.add_n(KL_loss)
 Lz = tf.reduce_mean(KL)
 
-cost = Lx + Lz
+cost = Lx  # + Lz
 
 # OPTIMIZATION
 
@@ -180,8 +181,8 @@ for i, (g, v) in enumerate(grads):
 
 train_op = optimizer.apply_gradients(grads)
 
-t_fn = "/home/solli-comphys/github/VAE-event-classification/data/processed/train.npy"
-te_fn = "/home/solli-comphys/github/VAE-event-classification/data/processed/test.npy"
+t_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/train.npy"
+te_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/test.npy"
 
 X_train = np.load(t_fn)
 n_train = X_train.shape[0]
@@ -189,10 +190,10 @@ n_train = X_train.shape[0]
 X_test = np.load(te_fn)
 n_test = X_test.shape[0]
 
+train_iters = n_train // batch_size
+
 fetches = []
 fetches.extend([Lx, Lz, train_op])
-Lxs = [0]*train_iters
-Lzs = [0]*train_iters
 
 sess = tf.InteractiveSession()
 
@@ -203,50 +204,71 @@ for v in tf.global_variables():
     print("%s : %s " % (v.name, v.get_shape()))
 
 
-def fetch_minibatch(x):
-    ind = np.random.randint(0, n_train, size=(batch_size, ))
-    return X_train[ind].reshape(batch_size, n_pixels)
-
-
 def store_result():
+    print("saving model and drawings")
     canvasses = sess.run(canvas_seq, feed_dict)
     canvasses = np.array(canvasses)
 
-    filename = "/home/solli-comphys/github/VAE-event-classification/drawing/canvasses.npy"
+    filename = "/Users/solli/Documents/github/VAE-event-classification/drawing/canvasses.npy"
     np.save(filename, canvasses)
 
-    model_fn = "/home/solli-comphys/github/VAE-event-classification/models/draw.ckpt"
+    model_fn = "/Users/solli/Documents/github/VAE-event-classification/models/draw.ckpt"
     saver.save(sess, model_fn)
 
 
+class BatchManager:
+
+    def __init__(self, nSamples):
+        self.available = np.arange(0, nSamples)
+        self.nSamples = nSamples
+
+    def fetch_minibatch(self, x):
+        tmp_ind = np.random.randint(0, self.nSamples, size=(batch_size, ))
+        ind = self.available[tmp_ind]
+
+        self.available = np.delete(self.available, tmp_ind)
+        self.nSamples = len(self.available)
+
+        return X_train[ind].reshape(batch_size, n_pixels)
+
+
 n_mvavg = 5
-moving_average = [0]*(train_iters // n_mvavg)
+moving_average = [0] * (epochs // n_mvavg)
 best_average = 1e5
 to_average = [0]*n_mvavg
 ta_which = 0
+all_lx = [0]*epochs
+all_lz = [0]*epochs
 
+for i in range(epochs):
+    Lxs = [0]*train_iters
+    Lzs = [0]*train_iters
+    bm_inst = BatchManager(len(X_train))
 
-for i in range(train_iters):
-    x_train = fetch_minibatch(X_train)
-    feed_dict = {x: x_train}
-    results = sess.run(fetches, feed_dict)
-    Lxs[i], Lzs[i], _ = results
+    for j in range(train_iters):
+        x_train = bm_inst.fetch_minibatch(X_train)
+        feed_dict = {x: x_train}
+        results = sess.run(fetches, feed_dict)
+        Lxs[j], Lzs[j], _ = results
 
-    to_average[ta_which] = Lxs[i]
+    all_lz[i] = tf.reduce_mean(Lzs).eval()
+    all_lx[i] = tf.reduce_mean(Lxs).eval()
+
+    to_average[ta_which] = all_lx[i]
     ta_which += 1
 
     if i % n_mvavg == 0:
         ta_which = 0
-        moving_average[i // n_mvavg] = np.average(to_average)
+        moving_average[i // n_mvavg] = tf.reduce_mean(to_average).eval()
 
-        if moving_average[i // 10] < best_average:
+        if moving_average[i // n_mvavg] < best_average:
             store_result()
             best_average = moving_average[i // n_mvavg]
-        print("iter=%d : Lx: %f Lz: %f mvAVG: %f" % (
-                        i,
-                        Lxs[i],
-                        Lzs[i],
-                        moving_average[i//n_mvavg]))
+        print("epoch=%d : Lx: %f Lz: %f mvAVG: %f" % (
+            i,
+            all_lx[i],
+            all_lz[i],
+            moving_average[i//n_mvavg]))
 
 # TRAINING DONE
 
@@ -254,9 +276,10 @@ for i in range(train_iters):
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 20), sharex=True)
 plt.suptitle("Loss function components")
 
-axs[0].plot(range(train_iters), Lxs, label=r"$\mathcal{L}_x$")
-axs[1].plot(range(train_iters), Lzs, label=r"$\mathcal{L}_z$")
+axs[0].plot(range(epochs), all_lx, label=r"$\mathcal{L}_x$")
+axs[1].plot(range(epochs), all_lz, label=r"$\mathcal{L}_z$")
 
-fig.savefig("/home/solli-comphys/github/VAE-event-classification/plots∕loss_functions.png")
+fig.savefig(
+    "/Users/solli/Documents/github/VAE-event-classification/plots∕loss_functions.png")
 
 sess.close()
