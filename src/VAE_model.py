@@ -17,19 +17,19 @@ test_mode = False
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
 kernel_size = [2, 2]
-dec_size = 30 if test_mode else 150  # 00
-enc_size = 30 if test_mode else 150  # 00
-T = 7 if test_mode else 10
-batch_size = 100
+dec_size = 10 if test_mode else 100  # 00
+enc_size = 10 if test_mode else 100  # 00
+T = 5 if test_mode else 20
+batch_size = 10
 input_size = (batch_size, H, W, 1)
 
-epochs = 50
+epochs = 20 if test_mode else 100
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 40 if test_mode else 100
+latent_dim = 10 if test_mode else 50
 
 DO_SHARE = None
 
@@ -157,10 +157,10 @@ def binary_crossentropy(t, o):
     return -(t*tf.log(o+eps) + (1.0-t)*tf.log(1.0-o+eps))
 
 
-x_recons = tf.sigmoid(canvas_seq[-1])
+x_recons = tf.tanh(canvas_seq[-1])
 # Lx = tf.reduce_sum(binary_crossentropy(longform(x), x_recons), 1)
 # Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
-Lx = tf.losses.mean_squared_error(x, x_recons)
+Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
 
 KL_loss = [0]*T
 
@@ -237,7 +237,6 @@ class BatchManager:
 
         self.available = np.delete(self.available, tmp_ind)
         self.nSamples = len(self.available)
-
         return X_train[ind].reshape(batch_size, n_pixels)
 
 
@@ -294,6 +293,6 @@ axs[0].plot(range(epochs), all_lx, label=r"$\mathcal{L}_x$")
 axs[1].plot(range(epochs), all_lz, label=r"$\mathcal{L}_z$")
 
 fig.savefig(
-    "/Users/solli/Documents/github/VAE-event-classification/plots∕loss_functions.png")
+    "/Users/solli/Documents/github/VAE-event-classification/plots/loss_functions.png")
 
 sess.close()
