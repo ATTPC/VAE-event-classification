@@ -17,19 +17,19 @@ test_mode = False
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
 kernel_size = [2, 2]
-dec_size = 3 if test_mode else 150  # 00
-enc_size = 3 if test_mode else 150  # 00
-T = 2 if test_mode else 10
+dec_size = 30 if test_mode else 150  # 00
+enc_size = 30 if test_mode else 150  # 00
+T = 7 if test_mode else 10
 batch_size = 100
 input_size = (batch_size, H, W, 1)
 
-epochs = 20
+epochs = 50
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 2 if test_mode else 100
+latent_dim = 40 if test_mode else 100
 
 DO_SHARE = None
 
@@ -47,16 +47,19 @@ x = tf.placeholder(tf.float32, shape=(batch_size, n_pixels))
 #             kernel_shape=kernel_size,
 #             )
 
+regularizer = tf.contrib.layers.l2_regularizer(scale=0.1)
+initializer = tf.initializers.glorot_uniform()
+
 encoder = tf.nn.rnn_cell.LSTMCell(
     enc_size,
     state_is_tuple=True,
-    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001)
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001),
 )
 
 decoder = tf.nn.rnn_cell.LSTMCell(
     dec_size,
     state_is_tuple=True,
-    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001)
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001),
 )
 
 print(encoder.output_size, decoder.output_size)
@@ -80,12 +83,14 @@ def linear_conv(x, output_dim):
 
 
 def linear(x, output_dim):
-    w = tf.get_variable("w", [x.get_shape()[1], output_dim])
-    b = tf.get_variable(
-        "b",
-        [output_dim],
-        initializer=tf.constant_initializer(0.0))
-    return tf.matmul(x, w) + b
+    w = tf.get_variable("w", [x.get_shape()[1], output_dim],
+                        regularizer=regularizer,
+                        )
+    # b = tf.get_variable(
+    #    "b",
+    #    [output_dim],
+    #    initializer=tf.constant_initializer(0.0))
+    return tf.matmul(x, w)  # + b
 
 
 def read(x, x_hat, h_dec_prev):
@@ -154,7 +159,8 @@ def binary_crossentropy(t, o):
 
 x_recons = tf.sigmoid(canvas_seq[-1])
 # Lx = tf.reduce_sum(binary_crossentropy(longform(x), x_recons), 1)
-Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
+# Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
+Lx = tf.losses.mean_squared_error(x, x_recons)
 
 KL_loss = [0]*T
 
@@ -162,13 +168,16 @@ for t in range(T):
     mu_sq = tf.square(mus[t])
     sigma_sq = tf.square(sigmas[t])
     logsigma_sq = tf.square(logsigmas[t])
-    KL_loss[t] = 0.5*tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
-    KL_loss[t] -= latent_dim*.5
 
-KL = tf.add_n(KL_loss)
-Lz = tf.reduce_mean(KL)
+    KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
 
-cost = Lx  # + Lz
+KL = 0.5 * tf.add_n(KL_loss) - T/2
+Lz = 1/(T * latent_dim) * tf.reduce_mean(KL)
+
+cost = Lx + Lz
+reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+reg_term = tf.contrib.layers.apply_regularization(regularizer, reg_var)
+cost += reg_term
 
 # OPTIMIZATION
 
@@ -251,17 +260,22 @@ for i in range(epochs):
         results = sess.run(fetches, feed_dict)
         Lxs[j], Lzs[j], _ = results
 
+#        with tf.variable_scope("sigma", reuse=DO_SHARE):
+#            w = tf.get_variable("w",)
+#            print(sess.run(w))
+#
     all_lz[i] = tf.reduce_mean(Lzs).eval()
     all_lx[i] = tf.reduce_mean(Lxs).eval()
 
-    to_average[ta_which] = all_lx[i]
+    to_average[ta_which] = all_lx[i] + all_lz[i]
     ta_which += 1
 
-    if i % n_mvavg == 0:
+    if (1 + i) % n_mvavg == 0 and i > 0:
         ta_which = 0
         moving_average[i // n_mvavg] = tf.reduce_mean(to_average).eval()
+        to_average = [0] * n_mvavg
 
-        if moving_average[i // n_mvavg] < best_average:
+        if moving_average[i // n_mvavg] < best_average and i > 1:
             store_result()
             best_average = moving_average[i // n_mvavg]
         print("epoch=%d : Lx: %f Lz: %f mvAVG: %f" % (
