@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
 import sys
-
-from keras import backend as K
-import keras as ker
 import tensorflow as tf
 
 import matplotlib.pyplot as plt
@@ -12,7 +9,7 @@ import numpy as np
 # tf.enable_eager_execution()
 
 # %%
-test_mode = False
+test_mode = True
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
@@ -20,7 +17,7 @@ kernel_size = [2, 2]
 dec_size = 10 if test_mode else 100  # 00
 enc_size = 10 if test_mode else 100  # 00
 T = 5 if test_mode else 20
-batch_size = 10
+batch_size = 13
 input_size = (batch_size, H, W, 1)
 
 epochs = 20 if test_mode else 100
@@ -29,7 +26,7 @@ eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 50
+latent_dim = 13 if test_mode else 50
 
 DO_SHARE = None
 
@@ -50,16 +47,17 @@ x = tf.placeholder(tf.float32, shape=(batch_size, n_pixels))
 regularizer = tf.contrib.layers.l2_regularizer(scale=0.1)
 initializer = tf.initializers.glorot_uniform()
 
+decoder = tf.contrib.rnn.ConvLSTMCell(
+    conv_ndims=2,
+    input_shape=[H, W, 1],
+    kernel_shape=kernel_size,
+    output_channels=1
+)
+
 encoder = tf.nn.rnn_cell.LSTMCell(
     enc_size,
     state_is_tuple=True,
-    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001),
-)
-
-decoder = tf.nn.rnn_cell.LSTMCell(
-    dec_size,
-    state_is_tuple=True,
-    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001),
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
 )
 
 print(encoder.output_size, decoder.output_size)
@@ -71,25 +69,33 @@ def longform(x):
     return tf.reshape(x, (batch_size, n_pixels))
 
 
+def wideform(x):
+    return tf.reshape(x, (batch_size, H, W, 1))
+
+
 # network operations
 
 def linear_conv(x, output_dim):
-    w = tf.get_variable("w", [128, 128, output_dim])
+    w = tf.get_variable("w", [128, 128, output_dim],
+                        regularizer=regularizer
+                        )
     b = tf.get_variable(
         "b",
         [output_dim],
-        initializer=tf.constant_initializer(0.0))
-    return tf.reshape(tf.tensordot(x, w, [[1, 2], [0, 1]]), (100, 20)) + b
+        initializer=tf.constant_initializer(0.0),
+        regularizer=regularizer
+    )
+    return tf.reshape(tf.tensordot(x, w, [[1, 2], [0, 1]]), (batch_size, latent_dim)) + b
 
 
 def linear(x, output_dim):
     w = tf.get_variable("w", [x.get_shape()[1], output_dim],
                         regularizer=regularizer,
                         )
-    # b = tf.get_variable(
-    #    "b",
-    #    [output_dim],
-    #    initializer=tf.constant_initializer(0.0))
+    b = tf.get_variable(
+        "b",
+        [output_dim],
+        initializer=tf.constant_initializer(0.0))
     return tf.matmul(x, w)  # + b
 
 
@@ -129,7 +135,7 @@ canvas_seq = [0]*T
 mus, logsigmas, sigmas = [0]*T, [0]*T, [0]*T
 
 # initial states
-h_dec_prev = tf.zeros((batch_size, dec_size))
+h_dec_prev = tf.zeros((batch_size, n_pixels))
 c_prev = tf.zeros((batch_size, n_pixels))
 
 enc_state = encoder.zero_state(batch_size, tf.float32)
@@ -143,10 +149,15 @@ for t in range(T):
 
     h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 1))
     z, mus[t], logsigmas[t], sigmas[t] = sample(h_enc)
-    h_dec, dec_state = decode(dec_state, z)
-    canvas_seq[t] = c_prev+write(h_dec)
 
-    h_dec_prev = h_dec
+    with tf.variable_scope("z", reuse=DO_SHARE):
+        z_wide = wideform(linear(z, n_pixels))
+
+    h_dec, dec_state = decode(dec_state, z_wide)
+
+    canvas_seq[t] = c_prev + longform(h_dec)
+
+    h_dec_prev = longform(h_dec)
     c_prev = canvas_seq[t]
     DO_SHARE = True
 
