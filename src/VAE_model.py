@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 
-from keras import backend as K
-import keras as ker
 import tensorflow as tf
+
+import matplotlib
+matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 # tf.enable_eager_execution()
+print(os.getpid())
 
 # %%
 test_mode = False
@@ -17,19 +20,19 @@ test_mode = False
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
 kernel_size = [2, 2]
-dec_size = 10 if test_mode else 100  # 00
-enc_size = 10 if test_mode else 100  # 00
-T = 5 if test_mode else 20
-batch_size = 10
+dec_size = 10 if test_mode else 1000
+enc_size = 10 if test_mode else 1000 # 00
+T = 5 if test_mode else 10
+batch_size = 200
 input_size = (batch_size, H, W, 1)
 
-epochs = 20 if test_mode else 100
+epochs = 20 if test_mode else 150
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 50
+latent_dim = 10 if test_mode else 500
 
 DO_SHARE = None
 
@@ -37,29 +40,19 @@ DO_SHARE = None
 
 FLAGS = tf.flags.FLAGS
 
-e = tf.random_normal((batch_size, latent_dim), mean=0, stddev=1)
 x = tf.placeholder(tf.float32, shape=(batch_size, n_pixels))
-
-# encoder = tf.contrib.rnn.ConvLSTMCell(
-#             conv_ndims=2,
-#             input_shape=[H, W, 1],
-#             output_channels=1,
-#             kernel_shape=kernel_size,
-#             )
-
-regularizer = tf.contrib.layers.l2_regularizer(scale=0.1)
-initializer = tf.initializers.glorot_uniform()
+regularizer = None
 
 encoder = tf.nn.rnn_cell.LSTMCell(
     enc_size,
     state_is_tuple=True,
-    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001),
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
 )
 
 decoder = tf.nn.rnn_cell.LSTMCell(
     dec_size,
     state_is_tuple=True,
-    activity_regularizer=tf.contrib.layers.l2_regularizer(0.001),
+    activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
 )
 
 print(encoder.output_size, decoder.output_size)
@@ -73,7 +66,7 @@ def longform(x):
 
 # network operations
 
-def linear_conv(x, output_dim):
+def linear_conv(x, output_dim,):
     w = tf.get_variable("w", [128, 128, output_dim])
     b = tf.get_variable(
         "b",
@@ -82,15 +75,17 @@ def linear_conv(x, output_dim):
     return tf.reshape(tf.tensordot(x, w, [[1, 2], [0, 1]]), (100, 20)) + b
 
 
-def linear(x, output_dim):
+def linear(x, output_dim, regularizer = tf.contrib.layers.l2_regularizer, lmbd = 0.1):
     w = tf.get_variable("w", [x.get_shape()[1], output_dim],
-                        regularizer=regularizer,
+                        regularizer=regularizer(lmbd),
                         )
-    # b = tf.get_variable(
-    #    "b",
-    #    [output_dim],
-    #    initializer=tf.constant_initializer(0.0))
-    return tf.matmul(x, w)  # + b
+    b = tf.get_variable(
+       "b",
+       [output_dim],
+       initializer=tf.constant_initializer(0.0),
+       regularizer=regularizer(lmbd))
+    
+    return tf.matmul(x, w) + b
 
 
 def read(x, x_hat, h_dec_prev):
@@ -106,11 +101,16 @@ def sample(h_enc):
     """
     samples z_t from NormalDistribution(mu, sigma)
     """
+    e = tf.random_normal((batch_size, latent_dim), mean=0, stddev=1)
+
     with tf.variable_scope("mu", reuse=DO_SHARE):
-        mu = linear(h_enc, latent_dim)
+        mu = linear(h_enc, latent_dim, lmbd=0.1)
     with tf.variable_scope("sigma", reuse=DO_SHARE):
-        logsigma = linear(h_enc, latent_dim)
-        sigma = tf.exp(logsigma)
+        sigma = linear(h_enc, latent_dim,
+                lmbd=0.1,
+                regularizer=tf.contrib.layers.l1_regularizer)
+        sigma = tf.clip_by_value(sigma, 1, 1e4)
+        logsigma = tf.log(sigma)
 
     return (mu + sigma*e, mu, logsigma, sigma)
 
@@ -157,10 +157,10 @@ def binary_crossentropy(t, o):
     return -(t*tf.log(o+eps) + (1.0-t)*tf.log(1.0-o+eps))
 
 
-x_recons = tf.tanh(canvas_seq[-1])
-# Lx = tf.reduce_sum(binary_crossentropy(longform(x), x_recons), 1)
+x_recons = tf.sigmoid(canvas_seq[-1])
+Lx = tf.reduce_mean(tf.reduce_sum(binary_crossentropy(x, x_recons), 1))
 # Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
-Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
+# Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
 
 KL_loss = [0]*T
 
@@ -172,12 +172,12 @@ for t in range(T):
     KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
 
 KL = 0.5 * tf.add_n(KL_loss) - T/2
-Lz = 1/(T * latent_dim) * tf.reduce_mean(KL)
+Lz = tf.reduce_mean(KL)
 
 cost = Lx + Lz
-reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-reg_term = tf.contrib.layers.apply_regularization(regularizer, reg_var)
-cost += reg_term
+#reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+#reg_var = tf.sum(reg_var)
+cost += tf.losses.get_regularization_loss()
 
 # OPTIMIZATION
 
@@ -190,8 +190,8 @@ for i, (g, v) in enumerate(grads):
 
 train_op = optimizer.apply_gradients(grads)
 
-t_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/train.npy"
-te_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/test.npy"
+t_fn = "../data/processed/train.npy"
+te_fn = "../data/processed/test.npy"
 
 X_train = np.load(t_fn)
 n_train = X_train.shape[0]
@@ -218,10 +218,10 @@ def store_result():
     canvasses = sess.run(canvas_seq, feed_dict)
     canvasses = np.array(canvasses)
 
-    filename = "/Users/solli/Documents/github/VAE-event-classification/drawing/canvasses.npy"
+    filename = "../drawing/canvasses.npy"
     np.save(filename, canvasses)
 
-    model_fn = "/Users/solli/Documents/github/VAE-event-classification/models/draw.ckpt"
+    model_fn = "../models/draw.ckpt"
     saver.save(sess, model_fn)
 
 
@@ -265,6 +265,13 @@ for i in range(epochs):
 #
     all_lz[i] = tf.reduce_mean(Lzs).eval()
     all_lx[i] = tf.reduce_mean(Lxs).eval()
+    
+    if all_lz[i] < 0:
+        print("broken training")
+        print("Lx = ", all_lx[i])
+        print("Lz = ", all_lz[i])
+        sess.close()
+        break
 
     to_average[ta_which] = all_lx[i] + all_lz[i]
     ta_which += 1
@@ -285,6 +292,7 @@ for i in range(epochs):
 
 # TRAINING DONE
 
+sess.close()
 
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 20), sharex=True)
 plt.suptitle("Loss function components")
@@ -292,7 +300,7 @@ plt.suptitle("Loss function components")
 axs[0].plot(range(epochs), all_lx, label=r"$\mathcal{L}_x$")
 axs[1].plot(range(epochs), all_lz, label=r"$\mathcal{L}_z$")
 
-fig.savefig(
-    "/Users/solli/Documents/github/VAE-event-classification/plots/loss_functions.png")
+[a.legend() for a in axs]
 
-sess.close()
+fig.savefig(
+    "../plots/loss_functions.png")
