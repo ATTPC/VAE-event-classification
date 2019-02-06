@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import numpy as np
+import matplotlib.pyplot as plt
 import sys
 import os
 
@@ -8,23 +10,22 @@ import tensorflow as tf
 import matplotlib
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
-import numpy as np
 
 # tf.enable_eager_execution()
 print(os.getpid())
 
 # %%
-test_mode = False
+test_mode = True
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
-kernel_size = [2, 2]
+N = 3  # number of filters
+use_attention = True
+
 dec_size = 10 if test_mode else 1000
-enc_size = 10 if test_mode else 1000 # 00
+enc_size = 10 if test_mode else 1000  # 00
 T = 5 if test_mode else 10
 batch_size = 200
-input_size = (batch_size, H, W, 1)
 
 epochs = 20 if test_mode else 150
 eta = 1e-3
@@ -75,20 +76,20 @@ def linear_conv(x, output_dim,):
     return tf.reshape(tf.tensordot(x, w, [[1, 2], [0, 1]]), (100, 20)) + b
 
 
-def linear(x, output_dim, regularizer = tf.contrib.layers.l2_regularizer, lmbd = 0.1):
+def linear(x, output_dim, regularizer=tf.contrib.layers.l2_regularizer, lmbd=0.1):
     w = tf.get_variable("w", [x.get_shape()[1], output_dim],
                         regularizer=regularizer(lmbd),
                         )
     b = tf.get_variable(
-       "b",
-       [output_dim],
-       initializer=tf.constant_initializer(0.0),
-       regularizer=regularizer(lmbd))
-    
+        "b",
+        [output_dim],
+        initializer=tf.constant_initializer(0.0),
+        regularizer=regularizer(lmbd))
+
     return tf.matmul(x, w) + b
 
 
-def read(x, x_hat, h_dec_prev):
+def read_no_attn(x, x_hat, h_dec_prev):
     return tf.concat([x, x_hat], 1)
 
 
@@ -107,8 +108,8 @@ def sample(h_enc):
         mu = linear(h_enc, latent_dim, lmbd=0.1)
     with tf.variable_scope("sigma", reuse=DO_SHARE):
         sigma = linear(h_enc, latent_dim,
-                lmbd=0.1,
-                regularizer=tf.contrib.layers.l1_regularizer)
+                       lmbd=0.1,
+                       regularizer=tf.contrib.layers.l1_regularizer)
         sigma = tf.clip_by_value(sigma, 1, 1e4)
         logsigma = tf.log(sigma)
 
@@ -120,10 +121,95 @@ def decode(state, input):
         return decoder(input, state)
 
 
-def write(h_dec):
+def write_no_attn(h_dec):
     with tf.variable_scope("write", reuse=DO_SHARE):
         return linear(h_dec, n_pixels)
 
+
+def attn_params(scope, h_dec):
+    with tf.variable_scope(scope, reuse=DO_SHARE):
+        tmp = linear(h_dec, 5)
+        gx, gy, logsigma_sq, logdelta, loggamma = tf.split(
+            tmp, 5, 1)
+
+    sigma_sq = tf.exp(logsigma_sq)
+    delta = tf.exp(logdelta)
+    gamma = tf.exp(loggamma)
+
+    gx = (H + 1)/2 * (gx + 1)
+    gy = (W + 1)/2 * (gy + 1)
+    delta = (H - 1)/(N - 1) * delta
+
+    return gx, gy, sigma_sq, delta, gamma
+
+
+def filters(gx, gy, sigma_sq, delta, gamma, N):
+    i = tf.convert_to_tensor(np.arange(N, dtype=np.float32))
+
+    mu_x = gx + (i - N/2 - 0.5) * delta  # batch_size, N
+    mu_y = gy + (i - N/2 - 0.5) * delta
+    # print(mu_x.get_shape(), gx.get_shape(), i.get_shape())
+    a = tf.convert_to_tensor(np.arange(H, dtype=np.float32))
+    b = tf.convert_to_tensor(np.arange(W, dtype=np.float32))
+
+    A, MU_X = tf.meshgrid(a, mu_x)  # batch_size, N * H
+    B, MU_Y = tf.meshgrid(b, mu_y)
+
+    A = tf.reshape(A, [batch_size, N, H])
+    B = tf.reshape(B, [batch_size, N, W])
+
+    MU_X = tf.reshape(MU_X, [batch_size, N, H])
+    MU_Y = tf.reshape(MU_Y, [batch_size, N, W])
+
+    sigma_sq = tf.reshape(sigma_sq, [batch_size, 1, 1])
+
+    Fx = tf.exp(- tf.square(A - MU_X)/(2*sigma_sq))
+    Fy = tf.exp(- tf.square(B - MU_Y)/(2*sigma_sq))
+
+    Fx = Fx / tf.maximum(tf.reduce_sum(Fx, 1, keepdims=True), eps)
+    Fy = Fy / tf.maximum(tf.reduce_sum(Fy, 1, keepdims=True), eps)
+
+    return Fx, Fy
+
+
+def read_attn(x, xhat, h_dec_prev, Fx, Fy, gamma):
+    Fx_t = tf.transpose(Fx, perm=[0, 2, 1])
+
+    x = tf.reshape(x, [200, 128, 128])
+    xhat = tf.reshape(xhat, [200, 128, 128])
+
+    FyxFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
+    FyxhatFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
+
+    return gamma * tf.concat([FyxFx_t, FyxhatFx_t], 1)
+
+
+def write_attn(h_dec, Fx, Fy, gamma):
+    with tf.variable_scope("writeW", reuse=DO_SHARE):
+        w = linear(h_dec, write_size)
+
+    w = tf.reshape(w, [-1, H, W])
+    Fy_t = tf.transpose(Fy, perm=[0, 2, 1])
+    tmp = tf.matmul(w, Fx)
+    tmp = tf.reshape(tf.matmul(Fy_t, tmp), [-1, H*H])
+
+    return tmp/tf.maximum(gamma, eps)
+
+
+def read_a(x, xhat, h_dec_prev):
+    params = attn_params("read", h_dec_prev)
+    Fx, Fy = filters(*params, N)
+    return read_attn(x, xhat, h_dec_prev, Fx, Fy, params[-1])
+
+
+def write_a(h_dec):
+    params_m = attn_params("write", h_dec)
+    Fx_m, Fy_m = filters(*params_m, H)
+    return write_attn(h_dec, Fx_m, Fy_m, params_m[-1])
+
+
+read = read_a if use_attention else read_no_attn
+write = write_a if use_attention else write_no_attn
 
 canvas_seq = [0]*T
 mus, logsigmas, sigmas = [0]*T, [0]*T, [0]*T
@@ -265,7 +351,7 @@ for i in range(epochs):
 #
     all_lz[i] = tf.reduce_mean(Lzs).eval()
     all_lx[i] = tf.reduce_mean(Lxs).eval()
-    
+
     if all_lz[i] < 0:
         print("broken training")
         print("Lx = ", all_lx[i])
@@ -304,3 +390,5 @@ axs[1].plot(range(epochs), all_lz, label=r"$\mathcal{L}_z$")
 
 fig.savefig(
     "../plots/loss_functions.png")
+
+print("print DONE!")
