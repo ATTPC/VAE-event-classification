@@ -15,15 +15,15 @@ matplotlib.use("Agg")
 print(os.getpid())
 
 # %%
-test_mode = True
+test_mode = False
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
-N = 3  # number of filters
+N = 3 if test_mode else 40  # number of filters
 use_attention = True
 
-dec_size = 10 if test_mode else 1000
-enc_size = 10 if test_mode else 1000  # 00
+dec_size = 10 if test_mode else 100
+enc_size = 10 if test_mode else 100
 T = 5 if test_mode else 10
 batch_size = 200
 
@@ -33,7 +33,7 @@ eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 500
+latent_dim = 10 if test_mode else 50
 
 DO_SHARE = None
 
