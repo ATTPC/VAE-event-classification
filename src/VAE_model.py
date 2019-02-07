@@ -19,21 +19,21 @@ test_mode = False
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
-N = 3 if test_mode else 40  # number of filters
+N = 3 if test_mode else 50 # number of filters
 use_attention = True
 
-dec_size = 10 if test_mode else 100
-enc_size = 10 if test_mode else 100
+dec_size = 10 if test_mode else 1000
+enc_size = 10 if test_mode else 1000
 T = 5 if test_mode else 10
-batch_size = 200
+batch_size = 10
 
-epochs = 20 if test_mode else 150
+epochs = 5 if test_mode else 60 
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 50
+latent_dim = 10 if test_mode else 100
 
 DO_SHARE = None
 
@@ -175,8 +175,8 @@ def filters(gx, gy, sigma_sq, delta, gamma, N):
 def read_attn(x, xhat, h_dec_prev, Fx, Fy, gamma):
     Fx_t = tf.transpose(Fx, perm=[0, 2, 1])
 
-    x = tf.reshape(x, [200, 128, 128])
-    xhat = tf.reshape(xhat, [200, 128, 128])
+    x = tf.reshape(x, [batch_size, 128, 128])
+    xhat = tf.reshape(xhat, [batch_size, 128, 128])
 
     FyxFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
     FyxhatFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
@@ -186,7 +186,7 @@ def read_attn(x, xhat, h_dec_prev, Fx, Fy, gamma):
 
 def write_attn(h_dec, Fx, Fy, gamma):
     with tf.variable_scope("writeW", reuse=DO_SHARE):
-        w = linear(h_dec, write_size)
+        w = linear(h_dec, write_size, tf.contrib.layers.l1_regularizer, lmbd=1e-2)
 
     w = tf.reshape(w, [-1, H, W])
     Fy_t = tf.transpose(Fy, perm=[0, 2, 1])
@@ -244,9 +244,11 @@ def binary_crossentropy(t, o):
 
 
 x_recons = tf.sigmoid(canvas_seq[-1])
+#x_recons = canvas_seq[-1]
+
 Lx = tf.reduce_mean(tf.reduce_sum(binary_crossentropy(x, x_recons), 1))
-# Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
-# Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
+#Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
+#Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
 
 KL_loss = [0]*T
 
@@ -303,13 +305,16 @@ def store_result():
     print("saving model and drawings")
     canvasses = sess.run(canvas_seq, feed_dict)
     canvasses = np.array(canvasses)
-
+    references = np.array(feed_dict[x])
+    
     filename = "../drawing/canvasses.npy"
     np.save(filename, canvasses)
 
     model_fn = "../models/draw.ckpt"
     saver.save(sess, model_fn)
 
+    ref_fn = "../drawing/references.npy"
+    np.save(ref_fn, references)
 
 class BatchManager:
 
@@ -378,6 +383,24 @@ for i in range(epochs):
 
 # TRAINING DONE
 
+
+# Generate samples 
+"""
+n_samples = 10
+generated_samples = np.zeros((n_samples, T))
+
+dec_state = decoder.zero_state(batch_size, tf.float32)
+h_dec = tf.zeros((batch_size, dec_size))
+canvas_seq = [0]*T
+
+for t in range(T):
+    z = tf.convert_to_tensor(np.random.rand(batch_size, latent_dim).astype(np.float32))
+    h_dec, dec_state = decode(dec_state, z)
+    canvas_seq[t] = c_prev+write(h_dec)
+
+    h_dec_prev = h_dec
+    c_prev = canvas_seq[t]
+"""
 sess.close()
 
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 20), sharex=True)
@@ -392,3 +415,7 @@ fig.savefig(
     "../plots/loss_functions.png")
 
 print("print DONE!")
+
+
+
+
