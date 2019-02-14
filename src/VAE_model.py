@@ -19,21 +19,21 @@ test_mode = False
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
-N = 3 if test_mode else 50 # number of filters
+N = 3 if test_mode else 60 # number of filters
 use_attention = True
 
-dec_size = 10 if test_mode else 1000
-enc_size = 10 if test_mode else 1000
+dec_size = 10 if test_mode else 1200
+enc_size = 10 if test_mode else 1200
 T = 5 if test_mode else 10
-batch_size = 10
+batch_size = 50
 
-epochs = 5 if test_mode else 60 
+epochs = 5 if test_mode else 150
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 100
+latent_dim = 10 if test_mode else 8
 
 DO_SHARE = None
 
@@ -287,10 +287,12 @@ n_train = X_train.shape[0]
 X_test = np.load(te_fn)
 n_test = X_test.shape[0]
 
+print("N Train: ", n_train, "| N test :", n_test )
+
 train_iters = n_train // batch_size
 
 fetches = []
-fetches.extend([Lx, Lz, train_op])
+fetches.extend([Lx, Lz, z, train_op])
 
 sess = tf.InteractiveSession()
 
@@ -348,7 +350,7 @@ for i in range(epochs):
         x_train = bm_inst.fetch_minibatch(X_train)
         feed_dict = {x: x_train}
         results = sess.run(fetches, feed_dict)
-        Lxs[j], Lzs[j], _ = results
+        Lxs[j], Lzs[j], _, _ = results
 
 #        with tf.variable_scope("sigma", reuse=DO_SHARE):
 #            w = tf.get_variable("w",)
@@ -401,6 +403,32 @@ for t in range(T):
     h_dec_prev = h_dec
     c_prev = canvas_seq[t]
 """
+
+# Generate latent expressions
+X_tup = (X_train, X_test)
+lat_vals = []
+
+
+for i in range(2):
+    X = X_tup[i]
+    n_latent = (X.shape[0]//batch_size)*batch_size
+    latent_values = np.zeros((n_latent, latent_dim))
+    for i in range(X.shape[0]//batch_size):
+        start = i * batch_size
+        end = (i+1) * batch_size
+        to_feed = X[start:end].reshape((batch_size, H*W))
+        feed_dict = {x: to_feed}
+
+        _, _, z, _ = sess.run(fetches, feed_dict)
+        latent_values[start:end] = z
+    
+    lat_vals.append(latent_values)
+
+for i in range(2):
+    fn = "train_latent.npy" if i == 0 else "test_latent.npy"
+    l = lat_vals[i]
+    np.save("../drawing/latent/" + fn, l)
+
 sess.close()
 
 fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 20), sharex=True)
