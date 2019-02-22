@@ -16,14 +16,17 @@ print(os.getpid())
 
 # %%
 test_mode = False
+restore_mode = True
+generate_samples = True
+generate_latent = False
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
 N = 3 if test_mode else 60 # number of filters
 use_attention = True
 
-dec_size = 10 if test_mode else 1200
-enc_size = 10 if test_mode else 1200
+dec_size = 10 if test_mode else 1000
+enc_size = 10 if test_mode else 1000
 T = 5 if test_mode else 10
 batch_size = 50
 
@@ -33,7 +36,7 @@ eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 8
+latent_dim = 10 if test_mode else 10
 
 DO_SHARE = None
 
@@ -262,7 +265,7 @@ for t in range(T):
 KL = 0.5 * tf.add_n(KL_loss) - T/2
 Lz = tf.reduce_mean(KL)
 
-cost = Lx + Lz
+cost = Lx #+ Lz
 #reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 #reg_var = tf.sum(reg_var)
 cost += tf.losses.get_regularization_loss()
@@ -312,7 +315,7 @@ def store_result():
     filename = "../drawing/canvasses.npy"
     np.save(filename, canvasses)
 
-    model_fn = "../models/draw.ckpt"
+    model_fn = "../models/draw_attn.ckpt" if use_attention else "../models/draw_no_attn.ckpt" 
     saver.save(sess, model_fn)
 
     ref_fn = "../drawing/references.npy"
@@ -342,6 +345,11 @@ all_lx = [0]*epochs
 all_lz = [0]*epochs
 
 for i in range(epochs):
+    if restore_mode:
+        checkpoint_fn = "../models/draw_attn.ckpt" if use_attention else "../models/draw_no_attn.ckpt"
+        saver.restore(sess, checkpoint_fn)
+        break
+
     Lxs = [0]*train_iters
     Lzs = [0]*train_iters
     bm_inst = BatchManager(len(X_train))
@@ -350,7 +358,7 @@ for i in range(epochs):
         x_train = bm_inst.fetch_minibatch(X_train)
         feed_dict = {x: x_train}
         results = sess.run(fetches, feed_dict)
-        Lxs[j], Lzs[j], _, _ = results
+        Lxs[j], Lzs[j], _, _, = results
 
 #        with tf.variable_scope("sigma", reuse=DO_SHARE):
 #            w = tf.get_variable("w",)
@@ -386,48 +394,69 @@ for i in range(epochs):
 # TRAINING DONE
 
 
-# Generate samples 
-"""
-n_samples = 10
-generated_samples = np.zeros((n_samples, T))
-
-dec_state = decoder.zero_state(batch_size, tf.float32)
-h_dec = tf.zeros((batch_size, dec_size))
-canvas_seq = [0]*T
-
-for t in range(T):
-    z = tf.convert_to_tensor(np.random.rand(batch_size, latent_dim).astype(np.float32))
-    h_dec, dec_state = decode(dec_state, z)
-    canvas_seq[t] = c_prev+write(h_dec)
-
-    h_dec_prev = h_dec
-    c_prev = canvas_seq[t]
-"""
-
 # Generate latent expressions
 X_tup = (X_train, X_test)
 lat_vals = []
-
+recons_vals = []
 
 for i in range(2):
+    if not generate_latent:
+        break
+
     X = X_tup[i]
     n_latent = (X.shape[0]//batch_size)*batch_size
     latent_values = np.zeros((n_latent, latent_dim))
+    reconstructions = np.zeros((T, n_latent, H*W))
+
     for i in range(X.shape[0]//batch_size):
         start = i * batch_size
         end = (i+1) * batch_size
         to_feed = X[start:end].reshape((batch_size, H*W))
         feed_dict = {x: to_feed}
 
-        _, _, z, _ = sess.run(fetches, feed_dict)
+        _, _, z, _, = sess.run(fetches, feed_dict)
+        canvasses = sess.run(canvas_seq, feed_dict)
+
         latent_values[start:end] = z
+        reconstructions[:, start:end, :] = np.array(canvasses)
     
     lat_vals.append(latent_values)
+    recons_vals.append(reconstructions)
 
 for i in range(2):
+    if not generate_latent:
+        break
+
     fn = "train_latent.npy" if i == 0 else "test_latent.npy"
+    r_fn = "train_reconst.npy" if i == 0 else "test_reconst.npy"
+
     l = lat_vals[i]
+    r = recons_vals[i]
+
     np.save("../drawing/latent/" + fn, l)
+    np.save("../drawing/" + r_fn, r)
+
+
+# Generate samples 
+
+if generate_samples:
+    n_samples = batch_size
+
+    dec_state = decoder.zero_state(batch_size, tf.float32)
+    h_dec = tf.zeros((batch_size, dec_size))
+    c_prev = tf.zeros((batch_size, n_pixels))
+
+
+    for t in range(T):
+        z = tf.convert_to_tensor(np.random.rand(batch_size, latent_dim).astype(np.float32))
+        h_dec, dec_state = decode(dec_state, z)
+        canvas_seq[t] = (c_prev+write(h_dec)).eval()
+
+        h_dec_prev = h_dec
+        c_prev = canvas_seq[t]
+
+    canvasses = np.array(canvas_seq)
+    np.save("../drawing/generated/samples.npy", canvasses)
 
 sess.close()
 
