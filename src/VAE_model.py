@@ -15,10 +15,11 @@ matplotlib.use("Agg")
 print(os.getpid())
 
 # %%
+simulated_mode = True
 test_mode = False
 restore_mode = True
 generate_samples = True
-generate_latent = False
+generate_latent = True
 
 H, W = 128, 128  # image dimensions
 n_pixels = H*W  # number of pixels in image
@@ -215,6 +216,9 @@ read = read_a if use_attention else read_no_attn
 write = write_a if use_attention else write_no_attn
 
 canvas_seq = [0]*T
+z_seq = [0]*T
+dec_state_seq = [0]*T
+
 mus, logsigmas, sigmas = [0]*T, [0]*T, [0]*T
 
 # initial states
@@ -234,6 +238,9 @@ for t in range(T):
     z, mus[t], logsigmas[t], sigmas[t] = sample(h_enc)
     h_dec, dec_state = decode(dec_state, z)
     canvas_seq[t] = c_prev+write(h_dec)
+    z_seq[t] = z
+    dec_state_seq[t] = dec_state
+    print(dec_state[0].get_shape())
 
     h_dec_prev = h_dec
     c_prev = canvas_seq[t]
@@ -265,7 +272,7 @@ for t in range(T):
 KL = 0.5 * tf.add_n(KL_loss) - T/2
 Lz = tf.reduce_mean(KL)
 
-cost = Lx #+ Lz
+cost = Lx + Lz
 #reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
 #reg_var = tf.sum(reg_var)
 cost += tf.losses.get_regularization_loss()
@@ -281,8 +288,8 @@ for i, (g, v) in enumerate(grads):
 
 train_op = optimizer.apply_gradients(grads)
 
-t_fn = "../data/processed/train.npy"
-te_fn = "../data/processed/test.npy"
+t_fn = "../data/simulated/pr_train_simulated.npy" if simulated_mode else "../data/processed/train.npy" 
+te_fn = "../data/simulated/pr_test_simulated.npy" if simulated_mode else "../data/processed/test.npy"
 
 X_train = np.load(t_fn)
 n_train = X_train.shape[0]
@@ -295,7 +302,7 @@ print("N Train: ", n_train, "| N test :", n_test )
 train_iters = n_train // batch_size
 
 fetches = []
-fetches.extend([Lx, Lz, z, train_op])
+fetches.extend([Lx, Lz, z_seq, dec_state_seq, train_op])
 
 sess = tf.InteractiveSession()
 
@@ -312,13 +319,17 @@ def store_result():
     canvasses = np.array(canvasses)
     references = np.array(feed_dict[x])
     
-    filename = "../drawing/canvasses.npy"
+    filename = "../drawing/simulated/canvasses.npy" if simulated_mode else "../drawing/canvasses.npy"
     np.save(filename, canvasses)
 
     model_fn = "../models/draw_attn.ckpt" if use_attention else "../models/draw_no_attn.ckpt" 
+
+    if simulated_mode:
+        model_fn = "../models/simulated/draw_attn.ckpt" if use_attention else "../models/simulated/draw_no_attn.ckpt"
+
     saver.save(sess, model_fn)
 
-    ref_fn = "../drawing/references.npy"
+    ref_fn = "../drawing/simulated/references.npy" if simulated_mode else "../drawing/references.npy"
     np.save(ref_fn, references)
 
 class BatchManager:
@@ -347,6 +358,9 @@ all_lz = [0]*epochs
 for i in range(epochs):
     if restore_mode:
         checkpoint_fn = "../models/draw_attn.ckpt" if use_attention else "../models/draw_no_attn.ckpt"
+        if simulated_mode:
+            checkpoint_fn = "../models/simulated/draw_attn.ckpt" if use_attention else "../models/simulated/draw_no_attn.ckpt"
+
         saver.restore(sess, checkpoint_fn)
         break
 
@@ -358,7 +372,7 @@ for i in range(epochs):
         x_train = bm_inst.fetch_minibatch(X_train)
         feed_dict = {x: x_train}
         results = sess.run(fetches, feed_dict)
-        Lxs[j], Lzs[j], _, _, = results
+        Lxs[j], Lzs[j], _, _, _, = results
 
 #        with tf.variable_scope("sigma", reuse=DO_SHARE):
 #            w = tf.get_variable("w",)
@@ -405,7 +419,7 @@ for i in range(2):
 
     X = X_tup[i]
     n_latent = (X.shape[0]//batch_size)*batch_size
-    latent_values = np.zeros((n_latent, latent_dim))
+    latent_values = np.zeros((T, n_latent, latent_dim))
     reconstructions = np.zeros((T, n_latent, H*W))
 
     for i in range(X.shape[0]//batch_size):
@@ -414,10 +428,10 @@ for i in range(2):
         to_feed = X[start:end].reshape((batch_size, H*W))
         feed_dict = {x: to_feed}
 
-        _, _, z, _, = sess.run(fetches, feed_dict)
+        _, _, z_seq, dec_state_seq, _, = sess.run(fetches, feed_dict)
         canvasses = sess.run(canvas_seq, feed_dict)
 
-        latent_values[start:end] = z
+        latent_values[:, start:end, :] = z_seq
         reconstructions[:, start:end, :] = np.array(canvasses)
     
     lat_vals.append(latent_values)
@@ -432,15 +446,20 @@ for i in range(2):
 
     l = lat_vals[i]
     r = recons_vals[i]
-
-    np.save("../drawing/latent/" + fn, l)
-    np.save("../drawing/" + r_fn, r)
+    
+    if not simulated_mode:
+        np.save("../drawing/latent/" + fn, l)
+        np.save("../drawing/" + r_fn, r)
+    else:
+        np.save("../drawing/simulated/latent/" + fn, l)
+        np.save("../drawing/simulated/"+ r_fn, r)
 
 
 # Generate samples 
 
 if generate_samples:
     n_samples = batch_size
+    z_seq = [0]*T
 
     dec_state = decoder.zero_state(batch_size, tf.float32)
     h_dec = tf.zeros((batch_size, dec_size))
@@ -448,7 +467,11 @@ if generate_samples:
 
 
     for t in range(T):
-        z = tf.convert_to_tensor(np.random.rand(batch_size, latent_dim).astype(np.float32))
+        mu, sigma = (1.5, 1) if t<1 else (0., 1)
+        sample = np.random.normal(mu, sigma, (batch_size, latent_dim)).astype(np.float32)
+        z_seq[t] = sample
+        z = tf.convert_to_tensor(sample)
+        
         h_dec, dec_state = decode(dec_state, z)
         canvas_seq[t] = (c_prev+write(h_dec)).eval()
 
@@ -456,7 +479,13 @@ if generate_samples:
         c_prev = canvas_seq[t]
 
     canvasses = np.array(canvas_seq)
-    np.save("../drawing/generated/samples.npy", canvasses)
+
+    if not simulated_mode:
+        np.save("../drawing/generated/samples.npy", canvasses)
+        np.save("../drawing/generated/latent.npy", np.array(z_seq))
+    else:
+        np.save("../drawing/simulated/generated/samples.npy", canvasses)
+        np.save("../drawing/simulated/generated/latent.npy", np.array(z_seq))
 
 sess.close()
 
@@ -468,11 +497,13 @@ axs[1].plot(range(epochs), all_lz, label=r"$\mathcal{L}_z$")
 
 [a.legend() for a in axs]
 
-fig.savefig(
-    "../plots/loss_functions.png")
+if not simulated_mode:
+    fig.savefig(
+        "../plots/loss_functions.png")
+else:
+    fig.savefig(
+        "../plots/simulated_loss_functions.png")
 
 print("print DONE!")
-
-
 
 
