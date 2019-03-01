@@ -2,9 +2,37 @@
 
 from data_loader import DataLoader
 from skimage import util
+import sys
 import numpy as np
 
-file_location = "/Users/solli/Documents/github/VAE-event-classification/data/images.h5"
+file_location = "../data/images.h5"
+test_simulated = "../data/simulated/test_data.npy"
+train_simulated = "../data/simulated/train_data.npy"
+
+train_simulated = np.load(train_simulated)
+test_simulated = np.load(test_simulated)
+
+nonzero_train = np.nonzero(train_simulated)
+nonzero_test = np.nonzero(test_simulated)
+
+all_nonzero = np.concatenate([
+                train_simulated[nonzero_train],
+                test_simulated[nonzero_test],    
+                ], axis = 0)
+
+maxval = np.max(all_nonzero)
+minval = np.min(all_nonzero)
+
+b = (0.1 - minval/maxval) * (1 / (1 - minval/maxval))
+a = 1/maxval - b/maxval
+
+unitmap = lambda x: a*x + b 
+
+train_simulated[nonzero_train] = unitmap(train_simulated[nonzero_train])
+
+# print(np.max(train_simulated))
+np.save("../data/simulated/pr_train_simulated.npy", train_simulated)
+np.save("../data/simulated/pr_test_simulated.npy", test_simulated)
 X_train, y_train, X_test, y_test = DataLoader(file_location)
 
 
@@ -38,8 +66,8 @@ X_test[threshhold_indices_test] = 0
 X_train = X_train.reshape(X_train.shape + (1,))
 X_test = X_test.reshape(X_test.shape + (1,))
 
-t_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/train.npy"
-te_fn = "/Users/solli/Documents/github/VAE-event-classification/data/processed/test.npy"
+t_fn = "../data/processed/train.npy"
+te_fn = "../data/processed/test.npy"
 
 np.save(t_fn, X_train)
 np.save(te_fn, X_test)
