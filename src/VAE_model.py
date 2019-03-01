@@ -26,18 +26,18 @@ n_pixels = H*W  # number of pixels in image
 N = 3 if test_mode else 60 # number of filters
 use_attention = True
 
-dec_size = 10 if test_mode else 1000
-enc_size = 10 if test_mode else 1000
-T = 5 if test_mode else 10
-batch_size = 50
+dec_size = 10 if test_mode else 500
+enc_size = 10 if test_mode else 500
+T = 5 if test_mode else 15
+batch_size = 200
 
-epochs = 5 if test_mode else 150
+epochs = 5 if test_mode else 100
 eta = 1e-3
 eps = 1e-8
 
 read_size = 2*n_pixels
 write_size = n_pixels
-latent_dim = 10 if test_mode else 10
+latent_dim = 10 if test_mode else 15
 
 DO_SHARE = None
 
@@ -237,10 +237,10 @@ for t in range(T):
     h_enc, enc_state = encode(enc_state, tf.concat([r, h_dec_prev], 1))
     z, mus[t], logsigmas[t], sigmas[t] = sample(h_enc)
     h_dec, dec_state = decode(dec_state, z)
+
     canvas_seq[t] = c_prev+write(h_dec)
     z_seq[t] = z
-    dec_state_seq[t] = dec_state
-    print(dec_state[0].get_shape())
+    dec_state_seq[t] = dec_state[0]
 
     h_dec_prev = h_dec
     c_prev = canvas_seq[t]
@@ -412,6 +412,7 @@ for i in range(epochs):
 X_tup = (X_train, X_test)
 lat_vals = []
 recons_vals = []
+decoder_states = []
 
 for i in range(2):
     if not generate_latent:
@@ -420,6 +421,7 @@ for i in range(2):
     X = X_tup[i]
     n_latent = (X.shape[0]//batch_size)*batch_size
     latent_values = np.zeros((T, n_latent, latent_dim))
+    dec_state_array = np.zeros((T, n_latent, dec_size))
     reconstructions = np.zeros((T, n_latent, H*W))
 
     for i in range(X.shape[0]//batch_size):
@@ -429,13 +431,16 @@ for i in range(2):
         feed_dict = {x: to_feed}
 
         _, _, z_seq, dec_state_seq, _, = sess.run(fetches, feed_dict)
+
         canvasses = sess.run(canvas_seq, feed_dict)
 
         latent_values[:, start:end, :] = z_seq
         reconstructions[:, start:end, :] = np.array(canvasses)
+        dec_state_array[:, start:end, :] = dec_state_seq
     
     lat_vals.append(latent_values)
     recons_vals.append(reconstructions)
+    decoder_states.append(dec_state_array)
 
 for i in range(2):
     if not generate_latent:
@@ -443,17 +448,20 @@ for i in range(2):
 
     fn = "train_latent.npy" if i == 0 else "test_latent.npy"
     r_fn = "train_reconst.npy" if i == 0 else "test_reconst.npy"
+    dec_fn = "train_decoder_states.npy" if i == 0 else "test_decoder_states.npy"
 
     l = lat_vals[i]
     r = recons_vals[i]
+    d = decoder_states[i]
     
     if not simulated_mode:
         np.save("../drawing/latent/" + fn, l)
         np.save("../drawing/" + r_fn, r)
+        np.save("../drawing/" + dec_fn, d)
     else:
         np.save("../drawing/simulated/latent/" + fn, l)
         np.save("../drawing/simulated/"+ r_fn, r)
-
+        np.save("../drawing/simulated/" + dec_fn, d)
 
 # Generate samples 
 
@@ -467,7 +475,7 @@ if generate_samples:
 
 
     for t in range(T):
-        mu, sigma = (1.5, 1) if t<1 else (0., 1)
+        mu, sigma = (0, 1) if t<1 else (0., 1)
         sample = np.random.normal(mu, sigma, (batch_size, latent_dim)).astype(np.float32)
         z_seq[t] = sample
         z = tf.convert_to_tensor(sample)
