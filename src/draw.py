@@ -139,7 +139,7 @@ class DRAW:
         x_recons = tf.sigmoid(self.canvas_seq[-1])
         #x_recons = canvas_seq[-1]
 
-        Lx = tf.reduce_mean(tf.reduce_sum(reconst_loss(self.x, x_recons), 1))
+        self.Lx = tf.reduce_mean(tf.reduce_sum(reconst_loss(self.x, x_recons), 1))
         #Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
         #Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
 
@@ -153,9 +153,9 @@ class DRAW:
             KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
 
         KL = 0.5 * tf.add_n(KL_loss) - T/2
-        Lz = tf.reduce_mean(KL)
+        self.Lz = tf.reduce_mean(KL)
 
-        cost = Lx + Lz
+        cost = self.Lx + self.Lz
         #reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         #reg_var = tf.sum(reg_var)
         cost += tf.losses.get_regularization_loss()
@@ -165,15 +165,27 @@ class DRAW:
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
     def ComputeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
+        if not self.compiled:
+            print("please compile model first")
+            return 1
 
-        optimizer = optimizer_class(*opt_args **opt_kwds) 
-        grads = optimizer.compute_gradients(cost)
+        optimizer = optimizer_class(*opt_args, **opt_kwds) 
+        grads = optimizer.compute_gradients(self.cost)
 
         for i, (g, v) in enumerate(grads):
             if g is not None:
                 grads[i] = (tf.clip_by_norm(g, 5), v)
 
-        train_op = optimizer.apply_gradients(grads)
+        self.train_op = optimizer.apply_gradients(grads)
+
+        fetches = []
+        fetches.extend([
+            self.Lx,
+            self.Lz,
+            self.z_seq,
+            self.dec_state_seq,
+            self.train_op
+            ])
 
     def encode(self, state, input):
         with tf.variable_scope("encoder", reuse=self.DO_SHARE):
