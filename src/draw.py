@@ -164,6 +164,17 @@ class DRAW:
     def binary_crossentropy(self, t, o):
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
+    def ComputeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
+
+        optimizer = optimizer_class(*opt_args **opt_kwds) 
+        grads = optimizer.compute_gradients(cost)
+
+        for i, (g, v) in enumerate(grads):
+            if g is not None:
+                grads[i] = (tf.clip_by_norm(g, 5), v)
+
+        train_op = optimizer.apply_gradients(grads)
+
     def encode(self, state, input):
         with tf.variable_scope("encoder", reuse=self.DO_SHARE):
             return self.encoder(input, state)
@@ -365,3 +376,11 @@ if __name__ == "__main__":
             }
 
     draw_model.CompileModel(graph_kwds, loss_kwds)
+
+    opt = tf.train.AdamOptimizer
+    opt_args = [1e-2,]
+    opt_kwds = {
+            "beta1": 0.5,
+            }
+
+    draw_model.ComputeGradients(opt, opt_args, opt_kwds)
