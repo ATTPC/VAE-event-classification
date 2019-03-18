@@ -3,10 +3,19 @@ import tensorflow as tf
 
 
 class DRAW:
+    """
+    An implementation of the DRAW algorithm proposed by Gregor et. al 
+    Model requires initialization with hyperparameters and optional configuration 
+    detailed in __iniit__ 
+
+    Importantly the data is taken at initialization and accessed with Train. 
+
+    Model is compiled with the CompileModel and trained with the Train method. 
+    """
+
 
     def __init__(
             self,
-            use_attention,
             T,
             dec_size,
             enc_size,
@@ -14,7 +23,8 @@ class DRAW:
             batch_size,
             train_data,
             test_data,
-            attn_config = None
+            attn_config=None,
+            mode_config=None,
             ):
 
         tf.reset_default_graph()
@@ -50,6 +60,17 @@ class DRAW:
 
                 setattr(self, key, val)
 
+        self.restore_mode = False
+        self.simulated_mode = True
+        self.generate_samples = True
+        self.rerun_latent = not self.generate_samples
+        self.generate_latent = True
+        self.use_attention = True
+        
+        if not mode_config is None:
+            for key, val in mode_config:
+                setattr(self, key, val)
+
         self.DO_SHARE = None
         self.compiled = False
 
@@ -66,7 +87,7 @@ class DRAW:
             self._ModelGraph(**graph_kwds)
 
         if loss_kwds is None:
-            self.ModeLoss()
+            self._ModeLoss()
         else:
             self._ModelLoss(**loss_kwds)
         self.compiled = True
@@ -161,8 +182,10 @@ class DRAW:
         cost += tf.losses.get_regularization_loss()
         self.cost = cost
 
+
     def binary_crossentropy(self, t, o):
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
+
 
     def ComputeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
         if not self.compiled:
@@ -186,6 +209,107 @@ class DRAW:
             self.dec_state_seq,
             self.train_op
             ])
+
+
+    def StoreResult(
+            self, 
+            sess,
+            feed_dict,
+            data_dir,
+            model_dir
+            ):
+        print("saving model and drawings")
+        canvasses = sess.run(self.canvas_seq, feed_dict)
+        canvasses = np.array(canvasses)
+        references = np.array(feed_dict[x])
+        
+        filename = data_dir+"/simulated/canvasses.npy" if simulated_mode else data_dir+"/canvasses.npy"
+        np.save(filename, canvasses)
+
+        model_fn = model_dir+"/draw_attn.ckpt" if use_attention else model_dir+"/draw_no_attn.ckpt" 
+
+        if simulated_mode:
+            model_fn = model_dir+"/simulated/draw_attn.ckpt" if use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
+
+        saver.save(sess, model_fn)
+
+        ref_fn = data_dir+"/simulated/references.npy" if simulated_mode else data_dir+"/references.npy"
+        np.save(ref_fn, references)
+
+
+    def train(
+            self,
+            sess,
+            checkpoint_fn=None,
+            ):
+        n_mvavg = 5
+        moving_average = [0] * (epochs // n_mvavg)
+        best_average = 1e5
+        to_average = [0]*n_mvavg
+        ta_which = 0
+        all_lx = [0]*epochs
+        all_lz = [0]*epochs
+
+        for i in range(epochs):
+            if restore_mode:
+                checkpoint_fn = "../models/draw_attn.ckpt" if use_attention else "../models/draw_no_attn.ckpt"
+                if simulated_mode:
+                    checkpoint_fn = "../models/simulated/draw_attn.ckpt" if use_attention else "../models/simulated/draw_no_attn.ckpt"
+
+                saver.restore(sess, checkpoint_fn)
+                break
+
+            Lxs = [0]*train_iters
+            Lzs = [0]*train_iters
+
+            bm_inst = BatchManager(len(X_train))
+
+            for j in range(train_iters):
+                x_train = bm_inst.fetch_minibatch(X_train)
+                feed_dict = {x: x_train}
+                results = sess.run(fetches, feed_dict)
+                Lxs[j], Lzs[j], _, _, _, = results
+
+        #        with tf.variable_scope("sigma", reuse=DO_SHARE):
+        #            w = tf.get_variable("w",)
+        #            print(sess.run(w))
+        #
+            all_lz[i] = tf.reduce_mean(Lzs).eval()
+            all_lx[i] = tf.reduce_mean(Lxs).eval()
+
+            print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
+                    i,
+                    all_lx[i],
+                    all_lz[i]
+                    ),
+                    end="",
+                    )
+
+            if all_lz[i] < 0:
+                print("broken training")
+                print("Lx = ", all_lx[i])
+                print("Lz = ", all_lz[i])
+
+                sess.close()
+                break
+
+            if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
+                sess.close()
+                break
+
+            to_average[ta_which] = all_lx[i] + all_lz[i]
+            ta_which += 1
+
+            if (1 + i) % n_mvavg == 0 and i > 0:
+                ta_which = 0
+                moving_average[i // n_mvavg] = tf.reduce_mean(to_average).eval()
+                to_average = [0] * n_mvavg
+
+                if moving_average[i // n_mvavg] < best_average and i > 1:
+                    store_result()
+                    best_average = moving_average[i // n_mvavg]
+
+
 
     def encode(self, state, input):
         with tf.variable_scope("encoder", reuse=self.DO_SHARE):
@@ -217,14 +341,15 @@ class DRAW:
 
         return tf.matmul(x, w) + b
 
+
     def read_no_attn(self, x, x_hat, h_dec_prev):
         return tf.concat([x, x_hat], 1)
 
 
-
     def sample(self, h_enc):
         """
-        samples z_t from NormalDistribution(mu, sigma)
+        samples z_t from a parametrized NormalDistribution(mu, sigma)
+        the parametrization is trained to approach a normal via a KL loss
         """
 
         e = tf.random_normal((batch_size, self.latent_dim), mean=0, stddev=0.1)
@@ -337,7 +462,6 @@ class DRAW:
 
 if __name__ == "__main__":
 
-    use_attention = True
     T = 9
     enc_size = 10
     dec_size = 11
@@ -368,7 +492,6 @@ if __name__ == "__main__":
 
 
     draw_model = DRAW(
-            use_attention,
             T,
             dec_size,
             enc_size,
@@ -390,7 +513,7 @@ if __name__ == "__main__":
     draw_model.CompileModel(graph_kwds, loss_kwds)
 
     opt = tf.train.AdamOptimizer
-    opt_args = [1e-2,]
+    opt_args = [1e-1,]
     opt_kwds = {
             "beta1": 0.5,
             }
