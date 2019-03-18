@@ -132,8 +132,8 @@ class DRAW:
             initializer=initializer, 
         )
 
-        read = self.read_a if self.use_attention else self.readNoAttn
-        write = self.write_a if self.use_attention else self.writeNoAttn
+        self.read = self.read_a if self.use_attention else self.readNoAttn
+        self.write = self.write_a if self.use_attention else self.writeNoAttn
 
         self.canvas_seq = [0]*T
         self.z_seq = [0]*T
@@ -156,13 +156,13 @@ class DRAW:
             else:
                 x_hat = self.x - tf.sigmoid(c_prev)
 
-            r = read(self.x, x_hat, h_dec_prev)
+            r = self.read(self.x, x_hat, h_dec_prev)
 
             h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
             z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
             h_dec, dec_state = self.decode(dec_state, z)
 
-            self.canvas_seq[t] = c_prev+write(h_dec)
+            self.canvas_seq[t] = c_prev+self.write(h_dec)
             self.z_seq[t] = z
             self.dec_state_seq[t] = dec_state
             
@@ -171,6 +171,16 @@ class DRAW:
             self.DO_SHARE = True
 
     def _ModelLoss(self, reconst_loss=None):
+        """
+        Parameters
+        ----------
+
+        reconst_loss : function to compute reconstruction loss. Must take two arguments target and output
+        and return object of shape (batch_size, 1)
+
+        Computes the losses in reconstruction the target image and the KL loss in the latent expression wrt.
+        the target normal distribution.
+        """
 
         if reconst_loss is None:
             reconst_loss = self.binary_crossentropy
@@ -537,6 +547,121 @@ class DRAW:
         Fx_m, Fy_m = self.filters(*params_m, self.write_N)
         return self.write_attn(h_dec, Fx_m, Fy_m, params_m[-1])
 
+    def generateLatent(self, sess, save_dir, X_tup):
+        """
+        Parameters
+        ----------
+
+        sess : a tf.InteractiveSession instance
+
+        save_dir : directory to save files to
+        
+        X_tup: tuple of training data and test data, cannot have len 1, cannot have len 1
+
+        Generates latent expressions, decoder states and reconstructions on both the training and test set.
+        """
+
+        lat_vals = []
+        recons_vals = []
+        decoder_states = []
+
+        for i in range(2):
+            if not self.generate_latent:
+                break
+
+            X = X_tup[i]
+            n_latent = (X.shape[0]//batch_size)*batch_size
+            latent_values = np.zeros((self.T, n_latent, self.latent_dim))
+            dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
+            reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
+
+            for i in range(X.shape[0]//batch_size):
+                start = i * self.batch_size
+                end = (i+1) * self.batch_size
+                to_feed = X[start:end].reshape((self.batch_size, self.H*self.W))
+                feed_dict = {self.x: to_feed}
+
+                _, _, z_seq, dec_state_seq, _, = sess.run(self.fetches, feed_dict)
+
+                canvasses = sess.run(self.canvas_seq, feed_dict)
+
+                latent_values[:, start:end, :] = z_seq
+                reconstructions[:, start:end, :] = np.array(canvasses)
+                dec_state_array[:, :, start:end, :] = dec_state_seq
+            
+            lat_vals.append(latent_values)
+            recons_vals.append(reconstructions)
+            decoder_states.append(dec_state_array)
+
+        for i in range(2):
+
+            fn = "train_latent.npy" if i == 0 else "test_latent.npy"
+            r_fn = "train_reconst.npy" if i == 0 else "test_reconst.npy"
+            dec_fn = "train_decoder_states.npy" if i == 0 else "test_decoder_states.npy"
+
+            l = lat_vals[i]
+            r = recons_vals[i]
+            d = decoder_states[i]
+            
+            if not self.simulated_mode:
+                np.save(save_dir+"/latent/" + fn, l)
+                np.save(save_dir+"/" + r_fn, r)
+                np.save(save_dir+"/" + dec_fn, d)
+            else:
+                np.save(save_dir+"/simulated/latent/" + fn, l)
+                np.save(save_dir+"/simulated/"+ r_fn, r)
+                np.save(save_dir+"/simulated/" + dec_fn, d)
+
+
+    def generateSamples(self, save_dir, load_dir=None):
+        n_samples = self.batch_size
+        z_seq = [0]*T
+
+        if self.rerun_latent :
+            if load_dir is None:
+                print("To reconstruct please pass a directory from which to load samples and states")
+                return
+
+            latent_fn = load_dir+"/simulated/latent/train_latent.npy" if simulated_mode else load_dir+"/latent/train_latent.npy"
+            dec_state_fn = load_dir+"/simulated/train_decoder_states.npy" if simulated_mode else load_dir+"/train_decoder_states.npy"
+
+            decoder_states = np.load(dec_state_fn)
+            latent_samples = np.load(latent_fn)
+        
+        dec_state = self.decoder.zero_state(self.batch_size, tf.float32)
+        h_dec = tf.zeros((self.batch_size, self.dec_size))
+        c_prev = tf.zeros((self.batch_size, self.n_input))
+
+        for t in range(self.T):
+
+            if not self.rerun_latent:
+                mu, sigma = (0, 1) if t<1 else (0., 1)
+                sample = np.random.normal(mu, sigma, (batch_size, latent_dim)).astype(np.float32)
+            else:
+                sample = latent_samples[t, batch_size:2*batch_size, :].reshape((batch_size, latent_dim)).astype(np.float32)
+
+            z_seq[t] = sample
+            z = tf.convert_to_tensor(sample)
+            
+            if self.rerun_latent:
+                dec_state = decoder_states[t, :, self.batch_size:2*self.batch_size, :].reshape((2, self.batch_size, dec_size)).astype(np.float32)
+                dec_state = tf.nn.rnn_cell.LSTMStateTuple(dec_state[0], dec_state[1])
+
+            h_dec, dec_state = self.decode(dec_state, z)
+            self.canvas_seq[t] = (c_prev+self.write(h_dec)).eval()
+
+            h_dec_prev = h_dec
+            c_prev = self.canvas_seq[t]
+
+        canvasses = np.array(self.canvas_seq)
+
+        if not self.simulated_mode:
+            np.save(save_dir+"/generated/samples.npy", canvasses)
+            np.save(save_dir+"/generated/latent.npy", np.array(z_seq))
+        else:
+            np.save(save_dir+"/simulated/generated/samples.npy", canvasses)
+            np.save(save_dir+"/simulated/generated/latent.npy", np.array(z_seq))
+
 
 if __name__ == "__main__":
 
@@ -604,3 +729,7 @@ if __name__ == "__main__":
     model_dir = "../models"
 
     draw_model.train(sess, epochs, data_dir, model_dir, )
+
+    draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
+
+    draw_model.generateSamples("../drawing", "../drawing")
