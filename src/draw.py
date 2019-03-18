@@ -1,5 +1,6 @@
 import numpy as np 
 import tensorflow as tf
+from batchmanager import BatchManager
 
 
 class DRAW:
@@ -148,7 +149,7 @@ class DRAW:
         for t in range(self.T):
             # computing the error image
             if t == 0:
-                x_hat = self.x - c_prev
+                x_hat = self.x 
             else:
                 x_hat = self.x - tf.sigmoid(c_prev)
 
@@ -178,9 +179,9 @@ class DRAW:
         #Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
         #Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
 
-        KL_loss = [0]*T
+        KL_loss = [0]*self.T
 
-        for t in range(T):
+        for t in range(self.T):
             mu_sq = tf.square(self.mus[t])
             sigma_sq = tf.square(self.sigmas[t])
             logsigma_sq = tf.square(self.logsigmas[t])
@@ -270,25 +271,36 @@ class DRAW:
         canvasses = np.array(canvasses)
         references = np.array(feed_dict[x])
         
-        filename = data_dir+"/simulated/canvasses.npy" if simulated_mode else data_dir+"/canvasses.npy"
+        filename = data_dir+"/simulated/canvasses.npy" if self.simulated_mode else data_dir+"/canvasses.npy"
         np.save(filename, canvasses)
 
-        model_fn = model_dir+"/draw_attn.ckpt" if use_attention else model_dir+"/draw_no_attn.ckpt" 
+        model_fn = model_dir+"/draw_attn.ckpt" if self.use_attention else model_dir+"/draw_no_attn.ckpt" 
 
-        if simulated_mode:
-            model_fn = model_dir+"/simulated/draw_attn.ckpt" if use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
+        if self.simulated_mode:
+            model_fn = model_dir+"/simulated/draw_attn.ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
 
         saver.save(sess, model_fn)
 
-        ref_fn = data_dir+"/simulated/references.npy" if simulated_mode else data_dir+"/references.npy"
+        ref_fn = data_dir+"/simulated/references.npy" if self.simulated_mode else data_dir+"/references.npy"
         np.save(ref_fn, references)
 
 
     def train(
             self,
             sess,
+            epochs,
+            data_dir,
+            model_dir,
             checkpoint_fn=None,
             ):
+
+        """
+        Paramters
+        ---------
+
+
+        """
+
         n_mvavg = 5
         moving_average = [0] * (epochs // n_mvavg)
         best_average = 1e5
@@ -298,10 +310,10 @@ class DRAW:
         all_lz = [0]*epochs
 
         for i in range(epochs):
-            if restore_mode:
-                checkpoint_fn = "../models/draw_attn.ckpt" if use_attention else "../models/draw_no_attn.ckpt"
+            if self.restore_mode:
+                checkpoint_fn = model_dir+"/draw_attn.ckpt" if self.use_attention else model_dir+"/draw_no_attn.ckpt"
                 if simulated_mode:
-                    checkpoint_fn = "../models/simulated/draw_attn.ckpt" if use_attention else "../models/simulated/draw_no_attn.ckpt"
+                    checkpoint_fn = model_dir+"/simulated/draw_attn.ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
 
                 saver.restore(sess, checkpoint_fn)
                 break
@@ -309,12 +321,14 @@ class DRAW:
             Lxs = [0]*train_iters
             Lzs = [0]*train_iters
 
-            bm_inst = BatchManager(len(X_train))
+            bm_inst = BatchManager(len(X_train), self.batch_size, self.n_inputs)
 
             for j in range(train_iters):
-                x_train = bm_inst.fetch_minibatch(X_train)
+                x_train = self.X_train[bm_inst.fetch_minibatch()]
+                x_train = x_train.reshape(self.batch_size, self.n_inputs)
+
                 feed_dict = {x: x_train}
-                results = sess.run(fetches, feed_dict)
+                results = sess.run(self.fetches, feed_dict)
                 Lxs[j], Lzs[j], _, _, _, = results
 
         #        with tf.variable_scope("sigma", reuse=DO_SHARE):
@@ -353,9 +367,8 @@ class DRAW:
                 to_average = [0] * n_mvavg
 
                 if moving_average[i // n_mvavg] < best_average and i > 1:
-                    store_result()
+                    self.StoreResult(sess, feed_dict, data_dir, model_dir)
                     best_average = moving_average[i // n_mvavg]
-
 
 
     def encode(self, state, input):
