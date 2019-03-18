@@ -5,8 +5,10 @@ import tensorflow as tf
 class DRAW:
     """
     An implementation of the DRAW algorithm proposed by Gregor et. al 
+    ArXiv id: 1502.04623v2
+
     Model requires initialization with hyperparameters and optional configuration 
-    detailed in __iniit__ 
+    detailed in __init__ 
 
     Importantly the data is taken at initialization and accessed with Train. 
 
@@ -80,6 +82,18 @@ class DRAW:
             graph_kwds=None,
             loss_kwds=None,
             ):
+        """
+        Paramters 
+        ---------
+
+        graph_kwds : dictionary with keywords
+            initializer - one of tf.initializers uninstantiatiated
+
+        loss_kwds : dictionary with keywords
+            loss - one of tf.losses uninstantiated
+
+        Compiles model graph with reconstruction and KL loss
+        """
         
         if graph_kwds is None:
             self._ModelGraph()
@@ -188,6 +202,22 @@ class DRAW:
 
 
     def ComputeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
+        """
+        Parameters:
+        ----------
+
+        optimizer_class : One of tf.optimizers, uninstantiated
+
+        opt_args : arguments to the optimizer, ordered
+
+        opt_kwds : dictionary of keyword arguments to optimizer
+
+        Computes the losses for the model. Train method is contingent on this being
+        called first. 
+
+        Takes an tf.optimizers class and corresponding arguments and kwdargs to be instantiated. 
+        """
+
         if not self.compiled:
             print("please compile model first")
             return 1
@@ -218,6 +248,23 @@ class DRAW:
             data_dir,
             model_dir
             ):
+
+        """
+        Paramters 
+        ---------
+
+        sess : a tensorflow session used in trainig 
+
+        feed_dict : dictionary with batch of inputs 
+
+        data_dir : directory to save reconstructed samples 
+
+        model_dir : directory to save model checkpoint
+
+        Runs an single batch through the model and saves reconstructions and 
+        a model checkpoint
+        """
+
         print("saving model and drawings")
         canvasses = sess.run(self.canvas_seq, feed_dict)
         canvasses = np.array(canvasses)
