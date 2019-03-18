@@ -24,33 +24,40 @@ class DRAW:
             enc_size,
             latent_dim,
             batch_size,
-            train_data,
-            test_data,
+            X,
             attn_config=None,
             mode_config=None,
             ):
 
         tf.reset_default_graph()
         
-        self.use_attention = use_attention
         self.T = T
         self.dec_size = dec_size 
         self.enc_size = enc_size
         self.latent_dim = latent_dim
         self.batch_size = batch_size 
+
+        self.X = X 
         self.eps = 1e-8
 
-        self.train_shape = train_data.shape
+        self.data_shape = self.X.shape
 
-        if len(self.train_shape) == 3 or len(self.train_shape) == 4:
-            self.n_input = self.train_shape[1] * self.train_shape[2]
-            self.H = self.train_shape[1]
-            self.W = self.train_shape[2]
-            self.n_train = self.train_shape[0]
+        self.restore_mode = False
+        self.simulated_mode = True
+        self.generate_samples = True
+        self.rerun_latent = not self.generate_samples
+        self.generate_latent = True
+        self.use_attention = True
+
+        if len(self.data_shape) == 3 or len(self.data_shape) == 4:
+            self.n_input = self.data_shape[1] * self.data_shape[2]
+            self.H = self.data_shape[1]
+            self.W = self.data_shape[2]
+            self.n_data = self.data_shape[0]
 
         else:
             print("""Wrong input dimensions expected
-                    x_train to have DIM == 3 or DIM == 4 got DIM == {}""".format(len(self.train_shape)))
+                    x_train to have DIM == 3 or DIM == 4 got DIM == {}""".format(len(self.data_shape)))
 
         if self.use_attention and attn_config is None:
             print("""If attention is used then parameters read_N, write_N and corresponding 
@@ -63,12 +70,6 @@ class DRAW:
 
                 setattr(self, key, val)
 
-        self.restore_mode = False
-        self.simulated_mode = True
-        self.generate_samples = True
-        self.rerun_latent = not self.generate_samples
-        self.generate_latent = True
-        self.use_attention = True
         
         if not mode_config is None:
             for key, val in mode_config:
@@ -76,8 +77,9 @@ class DRAW:
 
         self.DO_SHARE = None
         self.compiled = False
+        self.grad_op = False
 
-    
+
     def CompileModel(
             self,
             graph_kwds=None,
@@ -105,6 +107,7 @@ class DRAW:
             self._ModeLoss()
         else:
             self._ModelLoss(**loss_kwds)
+
         self.compiled = True
 
 
@@ -129,8 +132,8 @@ class DRAW:
             initializer=initializer, 
         )
 
-        read = self.read_a if self.use_attention else self.read_no_attn
-        write = self.write_a if self.use_attention else self.write_no_attn
+        read = self.read_a if self.use_attention else self.readNoAttn
+        write = self.write_a if self.use_attention else self.writeNoAttn
 
         self.canvas_seq = [0]*T
         self.z_seq = [0]*T
@@ -202,7 +205,7 @@ class DRAW:
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
 
-    def ComputeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
+    def computeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
         """
         Parameters:
         ----------
@@ -232,8 +235,8 @@ class DRAW:
 
         self.train_op = optimizer.apply_gradients(grads)
 
-        fetches = []
-        fetches.extend([
+        self.fetches = []
+        self.fetches.extend([
             self.Lx,
             self.Lz,
             self.z_seq,
@@ -241,8 +244,10 @@ class DRAW:
             self.train_op
             ])
 
+        self.grad_op = True
 
-    def StoreResult(
+
+    def storeResult(
             self, 
             sess,
             feed_dict,
@@ -300,7 +305,15 @@ class DRAW:
 
 
         """
+        
+        if not (self.compiled and self.grad_op):
+            print("cannot train before model is compiled and gradients are computed")
+            return
 
+        saver = tf.train.Saver()
+        tf.global_variables_initializer().run()
+
+        train_iters = self.data_shape[0] // self.batch_size
         n_mvavg = 5
         moving_average = [0] * (epochs // n_mvavg)
         best_average = 1e5
@@ -321,13 +334,13 @@ class DRAW:
             Lxs = [0]*train_iters
             Lzs = [0]*train_iters
 
-            bm_inst = BatchManager(len(X_train), self.batch_size, self.n_inputs)
+            bm_inst = BatchManager(self.n_data, self.batch_size, self.n_input)
 
             for j in range(train_iters):
-                x_train = self.X_train[bm_inst.fetch_minibatch()]
-                x_train = x_train.reshape(self.batch_size, self.n_inputs)
+                batch = self.X[bm_inst.fetchMinibatch()]
+                batch = batch.reshape(self.batch_size, self.n_input)
 
-                feed_dict = {x: x_train}
+                feed_dict = {self.x: batch}
                 results = sess.run(self.fetches, feed_dict)
                 Lxs[j], Lzs[j], _, _, _, = results
 
@@ -367,7 +380,7 @@ class DRAW:
                 to_average = [0] * n_mvavg
 
                 if moving_average[i // n_mvavg] < best_average and i > 1:
-                    self.StoreResult(sess, feed_dict, data_dir, model_dir)
+                    self.storeResult(sess, feed_dict, data_dir, model_dir)
                     best_average = moving_average[i // n_mvavg]
 
 
@@ -402,12 +415,17 @@ class DRAW:
         return tf.matmul(x, w) + b
 
 
-    def read_no_attn(self, x, x_hat, h_dec_prev):
+    def readNoAttn(self, x, x_hat, h_dec_prev):
         return tf.concat([x, x_hat], 1)
 
 
     def sample(self, h_enc):
         """
+        Parameters
+        ----------
+
+        h_enc : output from the encoder LSTM 
+
         samples z_t from a parametrized NormalDistribution(mu, sigma)
         the parametrization is trained to approach a normal via a KL loss
         """
@@ -426,7 +444,7 @@ class DRAW:
         return (mu + sigma*e, mu, logsigma, sigma)
 
 
-    def write_no_attn(self, h_dec):
+    def writeNoAttn(self, h_dec):
         with tf.variable_scope("write", reuse=self.DO_SHARE):
             return self.linear(h_dec, self.n_inputs)
 
@@ -558,7 +576,6 @@ if __name__ == "__main__":
             latent_dim,
             batch_size,
             train_data,
-            test_data,
             attn_config
             )
     
@@ -578,4 +595,12 @@ if __name__ == "__main__":
             "beta1": 0.5,
             }
 
-    draw_model.ComputeGradients(opt, opt_args, opt_kwds)
+    draw_model.computeGradients(opt, opt_args, opt_kwds)
+    
+    sess = tf.InteractiveSession()
+
+    epochs = 2
+    data_dir = "../data"
+    model_dir = "../models"
+
+    draw_model.train(sess, epochs, data_dir, model_dir, )
