@@ -135,11 +135,11 @@ class DRAW:
         self.read = self.read_a if self.use_attention else self.readNoAttn
         self.write = self.write_a if self.use_attention else self.writeNoAttn
 
-        self.canvas_seq = [0]*T
-        self.z_seq = [0]*T
-        self.dec_state_seq = [0]*T
+        self.canvas_seq = [0]*self.T
+        self.z_seq = [0]*self.T
+        self.dec_state_seq = [0]*self.T
 
-        self.mus, self.logsigmas, self.sigmas = [0]*T, [0]*T, [0]*T
+        self.mus, self.logsigmas, self.sigmas = [0]*self.T, [0]*self.T, [0]*self.T
 
         # initial states
         h_dec_prev = tf.zeros((self.batch_size, self.dec_size))
@@ -201,7 +201,7 @@ class DRAW:
 
             KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
 
-        KL = 0.5 * tf.add_n(KL_loss) - T/2
+        KL = 0.5 * tf.add_n(KL_loss) - self.T/2
         self.Lz = tf.reduce_mean(KL)
 
         cost = self.Lx + self.Lz
@@ -281,10 +281,9 @@ class DRAW:
         a model checkpoint
         """
 
-        print("saving model and drawings")
         canvasses = sess.run(self.canvas_seq, feed_dict)
         canvasses = np.array(canvasses)
-        references = np.array(feed_dict[x])
+        references = np.array(feed_dict[self.x])
         
         filename = data_dir+"/simulated/canvasses.npy" if self.simulated_mode else data_dir+"/canvasses.npy"
         np.save(filename, canvasses)
@@ -294,7 +293,7 @@ class DRAW:
         if self.simulated_mode:
             model_fn = model_dir+"/simulated/draw_attn.ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
 
-        saver.save(sess, model_fn)
+        self.saver.save(sess, model_fn)
 
         ref_fn = data_dir+"/simulated/references.npy" if self.simulated_mode else data_dir+"/references.npy"
         np.save(ref_fn, references)
@@ -320,7 +319,7 @@ class DRAW:
             print("cannot train before model is compiled and gradients are computed")
             return
 
-        saver = tf.train.Saver()
+        self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
 
         train_iters = self.data_shape[0] // self.batch_size
@@ -374,11 +373,9 @@ class DRAW:
                 print("Lx = ", all_lx[i])
                 print("Lz = ", all_lz[i])
 
-                sess.close()
                 break
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
-                sess.close()
                 break
 
             to_average[ta_which] = all_lx[i] + all_lz[i]
@@ -440,7 +437,7 @@ class DRAW:
         the parametrization is trained to approach a normal via a KL loss
         """
 
-        e = tf.random_normal((batch_size, self.latent_dim), mean=0, stddev=0.1)
+        e = tf.random_normal((self.batch_size, self.latent_dim), mean=0, stddev=0.1)
 
         with tf.variable_scope("mu", reuse=self.DO_SHARE):
             mu = self.linear(h_enc, self.latent_dim, lmbd=0.1)
@@ -570,12 +567,12 @@ class DRAW:
                 break
 
             X = X_tup[i]
-            n_latent = (X.shape[0]//batch_size)*batch_size
+            n_latent = (X.shape[0]//self.batch_size)*self.batch_size
             latent_values = np.zeros((self.T, n_latent, self.latent_dim))
             dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
 
-            for i in range(X.shape[0]//batch_size):
+            for i in range(X.shape[0]//self.batch_size):
                 start = i * self.batch_size
                 end = (i+1) * self.batch_size
                 to_feed = X[start:end].reshape((self.batch_size, self.H*self.W))
@@ -615,7 +612,7 @@ class DRAW:
 
     def generateSamples(self, save_dir, load_dir=None):
         n_samples = self.batch_size
-        z_seq = [0]*T
+        z_seq = [0]*self.T
 
         if self.rerun_latent :
             if load_dir is None:
@@ -636,9 +633,9 @@ class DRAW:
 
             if not self.rerun_latent:
                 mu, sigma = (0, 1) if t<1 else (0., 1)
-                sample = np.random.normal(mu, sigma, (batch_size, latent_dim)).astype(np.float32)
+                sample = np.random.normal(mu, sigma, (self.batch_size, self.latent_dim)).astype(np.float32)
             else:
-                sample = latent_samples[t, batch_size:2*batch_size, :].reshape((batch_size, latent_dim)).astype(np.float32)
+                sample = latent_samples[t, batch_size:2*batch_size, :].reshape((self.batch_size, self.latent_dim)).astype(np.float32)
 
             z_seq[t] = sample
             z = tf.convert_to_tensor(sample)
