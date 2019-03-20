@@ -44,9 +44,6 @@ class DRAW:
 
         self.restore_mode = False
         self.simulated_mode = True
-        self.generate_samples = True
-        self.rerun_latent = not self.generate_samples
-        self.generate_latent = True
         self.use_attention = True
 
         if len(self.data_shape) == 3 or len(self.data_shape) == 4:
@@ -65,7 +62,7 @@ class DRAW:
 
         elif self.use_attention:
             for key, val in attn_config.items():
-                if isinstance(val, (np.ndarray, np.generic)):
+                if isinstance(val, (np.ndarray, )):
                     val = tf.convert_to_tensor(val)
 
                 setattr(self, key, val)
@@ -151,18 +148,14 @@ class DRAW:
         # Unrolling the computational graph for the LSTM
         for t in range(self.T):
             # computing the error image
-            if t == 0:
-                x_hat = self.x 
-            else:
-                x_hat = self.x - tf.sigmoid(c_prev)
-
+            x_hat = self.x - tf.sigmoid(c_prev)
             r = self.read(self.x, x_hat, h_dec_prev)
 
             h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
             z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
             h_dec, dec_state = self.decode(dec_state, z)
 
-            self.canvas_seq[t] = c_prev+self.write(h_dec)
+            self.canvas_seq[t] = c_prev + self.write(h_dec)
             self.z_seq[t] = z
             self.dec_state_seq[t] = dec_state
             
@@ -170,7 +163,8 @@ class DRAW:
             c_prev = self.canvas_seq[t]
             self.DO_SHARE = True
 
-    def _ModelLoss(self, reconst_loss=None):
+    def _ModelLoss(self, reconst_loss=None, include_KL=True):
+
         """
         Parameters
         ----------
@@ -186,7 +180,7 @@ class DRAW:
             reconst_loss = self.binary_crossentropy
 
         x_recons = tf.sigmoid(self.canvas_seq[-1])
-        #x_recons = canvas_seq[-1]
+        #x_recons = tf.clip_by_value(self.canvas_seq[-1], 0, 1) 
 
         self.Lx = tf.reduce_mean(tf.reduce_sum(reconst_loss(self.x, x_recons), 1))
         #Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
@@ -204,7 +198,7 @@ class DRAW:
         KL = 0.5 * tf.add_n(KL_loss) - self.T/2
         self.Lz = tf.reduce_mean(KL)
 
-        cost = self.Lx + self.Lz
+        cost = self.Lx + self.Lz if include_KL else self.Lx
         #reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
         #reg_var = tf.sum(reg_var)
         cost += tf.losses.get_regularization_loss()
@@ -215,7 +209,13 @@ class DRAW:
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
 
-    def computeGradients(self, optimizer_class, opt_args=[], opt_kwds={}):
+    def computeGradients(
+            self,
+            optimizer_class, 
+            opt_args=[],
+            opt_kwds={},
+            ):
+
         """
         Parameters:
         ----------
@@ -281,6 +281,9 @@ class DRAW:
         a model checkpoint
         """
 
+        print()
+        print("Saving model and canvasses")
+
         canvasses = sess.run(self.canvas_seq, feed_dict)
         canvasses = np.array(canvasses)
         references = np.array(feed_dict[self.x])
@@ -289,7 +292,6 @@ class DRAW:
         np.save(filename, canvasses)
 
         model_fn = model_dir+"/draw_attn.ckpt" if self.use_attention else model_dir+"/draw_no_attn.ckpt" 
-
         if self.simulated_mode:
             model_fn = model_dir+"/simulated/draw_attn.ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
 
@@ -305,6 +307,7 @@ class DRAW:
             epochs,
             data_dir,
             model_dir,
+            earlystopping=True,
             checkpoint_fn=None,
             ):
 
@@ -323,13 +326,13 @@ class DRAW:
         tf.global_variables_initializer().run()
 
         train_iters = self.data_shape[0] // self.batch_size
-        n_mvavg = 5
+        n_mvavg = 2
         moving_average = [0] * (epochs // n_mvavg)
         best_average = 1e5
         to_average = [0]*n_mvavg
         ta_which = 0
-        all_lx = [0]*epochs
-        all_lz = [0]*epochs
+        all_lx = np.zeros(epochs)
+        all_lz = np.zeros(epochs)
 
         for i in range(epochs):
             if self.restore_mode:
@@ -377,18 +380,30 @@ class DRAW:
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
                 break
+            
+            if i >= n_mvavg: 
+                to_average[ta_which] = tf.reduce_mean(
+                        tf.reduce_sum(all_lx[i - n_mvavg: i] + all_lz[i - n_mvavg: i])).eval()
+                ta_which += 1
 
-            to_average[ta_which] = all_lx[i] + all_lz[i]
-            ta_which += 1
-
-            if (1 + i) % n_mvavg == 0 and i > 0:
+            if (1 + i) % n_mvavg == 0 and i >= n_mvavg:
                 ta_which = 0
-                moving_average[i // n_mvavg] = tf.reduce_mean(to_average).eval()
-                to_average = [0] * n_mvavg
 
-                if moving_average[i // n_mvavg] < best_average and i > 1:
-                    self.storeResult(sess, feed_dict, data_dir, model_dir)
-                    best_average = moving_average[i // n_mvavg]
+                mvavg_index = i // n_mvavg
+                moving_average[mvavg_index] = tf.reduce_mean(to_average).eval()
+
+                if earlystopping:
+                    do_earlystop = (i // n_mvavg) > 1
+
+                    if moving_average[mvavg_index - 1] < moving_average[mvavg_index] and do_earlystop:
+                        print("Earlystopping")
+
+                        return all_lx, all_lz 
+
+                to_average = [0] * n_mvavg
+                self.storeResult(sess, feed_dict, data_dir, model_dir)
+
+        return all_lx, all_lz
 
 
     def encode(self, state, input):
@@ -437,15 +452,17 @@ class DRAW:
         the parametrization is trained to approach a normal via a KL loss
         """
 
-        e = tf.random_normal((self.batch_size, self.latent_dim), mean=0, stddev=0.1)
+        e = tf.random_normal((self.batch_size, self.latent_dim), mean=0, stddev=1)
 
         with tf.variable_scope("mu", reuse=self.DO_SHARE):
             mu = self.linear(h_enc, self.latent_dim, lmbd=0.1)
+
         with tf.variable_scope("sigma", reuse=self.DO_SHARE):
             sigma = self.linear(h_enc, self.latent_dim,
                         lmbd=0.1,
-                        regularizer=tf.contrib.layers.l1_regularizer)
-            sigma = tf.clip_by_value(sigma, 1, 1e4)
+                        regularizer=tf.contrib.layers.l2_regularizer)
+
+            sigma = tf.clip_by_value(sigma, 1, 10)
             logsigma = tf.log(sigma)
 
         return (mu + sigma*e, mu, logsigma, sigma)
@@ -563,8 +580,6 @@ class DRAW:
         decoder_states = []
 
         for i in range(2):
-            if not self.generate_latent:
-                break
 
             X = X_tup[i]
             n_latent = (X.shape[0]//self.batch_size)*self.batch_size
@@ -610,11 +625,11 @@ class DRAW:
                 np.save(save_dir+"/simulated/" + dec_fn, d)
 
 
-    def generateSamples(self, save_dir, load_dir=None):
+    def generateSamples(self, save_dir, rerun_latent=False, load_dir=None):
         n_samples = self.batch_size
         z_seq = [0]*self.T
 
-        if self.rerun_latent :
+        if rerun_latent:
             if load_dir is None:
                 print("To reconstruct please pass a directory from which to load samples and states")
                 return
@@ -631,7 +646,7 @@ class DRAW:
 
         for t in range(self.T):
 
-            if not self.rerun_latent:
+            if not rerun_latent:
                 mu, sigma = (0, 1) if t<1 else (0., 1)
                 sample = np.random.normal(mu, sigma, (self.batch_size, self.latent_dim)).astype(np.float32)
             else:
@@ -640,7 +655,7 @@ class DRAW:
             z_seq[t] = sample
             z = tf.convert_to_tensor(sample)
             
-            if self.rerun_latent:
+            if rerun_latent:
                 dec_state = decoder_states[t, :, self.batch_size:2*self.batch_size, :].reshape((2, self.batch_size, dec_size)).astype(np.float32)
                 dec_state = tf.nn.rnn_cell.LSTMStateTuple(dec_state[0], dec_state[1])
 
