@@ -15,7 +15,7 @@ from counter import *
 T = 15
 enc_size = 400
 dec_size = 400
-latent_dim = 10
+latent_dim = 3
 epochs = 150
 
 batch_size = 50
