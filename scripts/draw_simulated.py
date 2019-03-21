@@ -4,21 +4,26 @@ sys.path.append("../src")
 import numpy as np
 import tensorflow as tf
 
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")
+
 from draw import DRAW
 from counter import *
 
 
 T = 15
-enc_size = 800
-dec_size = 500
-latent_dim = 50
+enc_size = 400
+dec_size = 400
+latent_dim = 10
+epochs = 150
 
 batch_size = 50
 train_data = np.load("../data/simulated/pr_train_simulated.npy")
 test_data = np.load("../data/simulated/pr_test_simulated.npy")
 
 delta = 0.8
-N = 30
+N = 55
 
 delta_write = delta
 delta_read = delta
@@ -77,11 +82,21 @@ data_dir = "../drawing"
 model_dir = "../models"
 
 lx, lz, = draw_model.train(sess, epochs, data_dir, model_dir, )
-loss_record[i, j, k, 0] = lx
-loss_record[i, j, k, 1] = lz
 
-#draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
+draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
 
-#draw_model.generateSamples("../drawing", "../drawing")
+draw_model.generateSamples("../drawing", "../drawing")
 
 sess.close()
+
+fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 20), sharex=True)
+plt.suptitle("Loss function components")
+
+axs[0].plot(range(epochs), lx, label=r"$\mathcal{L}_x$")
+axs[1].plot(range(epochs), lz, label=r"$\mathcal{L}_z$")
+
+[a.legend() for a in axs]
+[a.set_ylim((1000, 200)) for a in axs]
+
+fig.savefig(
+    "../plots/simulated_loss_functions.png")
