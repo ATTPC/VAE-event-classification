@@ -5,23 +5,26 @@ import numpy as np
 import tensorflow as tf
 
 from draw import DRAW
+from counter import *
 
 
 T = 15
-enc_size = 100
-dec_size = 100
-latent_dim = 10
+enc_size = 800
+dec_size = 500
+latent_dim = 50
 
 batch_size = 50
-train_data = np.load("../data/simulated/train_data.npy")
-test_data = np.load("../data/simulated/test_data.npy")
-all_data = np.concatenate((train_data, test_data), axis=0)
+train_data = np.load("../data/simulated/pr_train_simulated.npy")
+test_data = np.load("../data/simulated/pr_test_simulated.npy")
 
-delta_write = 10
-delta_read = 10 
+delta = 0.8
+N = 30
 
-read_N = 10
-write_N = 10
+delta_write = delta
+delta_read = delta
+
+read_N = N
+write_N = N
 
 array_delta_w = np.zeros((batch_size, 1))
 array_delta_w.fill(delta_write)
@@ -46,8 +49,8 @@ draw_model = DRAW(
         enc_size,
         latent_dim,
         batch_size,
-        all_data,
-        attn_config
+        train_data,
+        attn_config=attn_config
         )
 
 graph_kwds = {
@@ -61,7 +64,7 @@ loss_kwds = {
 draw_model.CompileModel(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
-opt_args = [1e-1,]
+opt_args = [1e-2,]
 opt_kwds = {
         "beta1": 0.5,
         }
@@ -70,14 +73,15 @@ draw_model.computeGradients(opt, opt_args, opt_kwds)
 
 sess = tf.InteractiveSession()
 
-epochs = 5
-data_dir = "../data"
+data_dir = "../drawing"
 model_dir = "../models"
 
-draw_model.train(sess, epochs, data_dir, model_dir, )
+lx, lz, = draw_model.train(sess, epochs, data_dir, model_dir, )
+loss_record[i, j, k, 0] = lx
+loss_record[i, j, k, 1] = lz
 
-draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
+#draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
 
-draw_model.generateSamples("../drawing", "../drawing")
+#draw_model.generateSamples("../drawing", "../drawing")
 
 sess.close()
