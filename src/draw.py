@@ -148,7 +148,11 @@ class DRAW:
         # Unrolling the computational graph for the LSTM
         for t in range(self.T):
             # computing the error image
-            x_hat = self.x - tf.sigmoid(c_prev)
+            if t == 0:
+                x_hat = c_prev
+            else:
+                x_hat = self.x - tf.sigmoid(c_prev)
+
             r = self.read(self.x, x_hat, h_dec_prev)
 
             h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
@@ -326,9 +330,8 @@ class DRAW:
         tf.global_variables_initializer().run()
 
         train_iters = self.data_shape[0] // self.batch_size
-        n_mvavg = 2
+        n_mvavg = 5
         moving_average = [0] * (epochs // n_mvavg)
-        best_average = 1e5
         to_average = [0]*n_mvavg
         ta_which = 0
         all_lx = np.zeros(epochs)
@@ -452,7 +455,7 @@ class DRAW:
         the parametrization is trained to approach a normal via a KL loss
         """
 
-        e = tf.random_normal((self.batch_size, self.latent_dim), mean=0, stddev=1)
+        #e = tf.random_normal((self.batch_size, self.latent_dim), mean=0, stddev=1)
 
         with tf.variable_scope("mu", reuse=self.DO_SHARE):
             mu = self.linear(h_enc, self.latent_dim, lmbd=0.1)
@@ -465,7 +468,7 @@ class DRAW:
             sigma = tf.clip_by_value(sigma, 1, 10)
             logsigma = tf.log(sigma)
 
-        return (mu + sigma*e, mu, logsigma, sigma)
+        return (mu + sigma, mu, logsigma, sigma)
 
 
     def writeNoAttn(self, h_dec):
@@ -476,8 +479,7 @@ class DRAW:
     def attn_params(self, scope, h_dec, N):
         with tf.variable_scope(scope, reuse=self.DO_SHARE):
             tmp = self.linear(h_dec, 4, regularizer=tf.contrib.layers.l1_regularizer)
-            gx, gy, logsigma_sq, loggamma = tf.split(
-                tmp, 4, 1)
+            gx, gy, logsigma_sq, loggamma = tf.split(tmp, 4, 1)
 
         sigma_sq = tf.exp(logsigma_sq)
 
