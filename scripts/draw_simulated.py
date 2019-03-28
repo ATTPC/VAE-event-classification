@@ -12,7 +12,7 @@ from draw import DRAW
 from counter import *
 
 
-T = 15
+T = 6
 enc_size = 400
 dec_size = 400
 latent_dim = 3
@@ -63,7 +63,8 @@ graph_kwds = {
         }
 
 loss_kwds = {
-        "reconst_loss": None
+        "reconst_loss": None,
+        "include_KL":False
         }
 
 draw_model.CompileModel(graph_kwds, loss_kwds)
