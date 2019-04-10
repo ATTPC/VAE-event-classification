@@ -27,6 +27,7 @@ class DRAW:
             X,
             attn_config=None,
             mode_config=None,
+            run=None
             ):
 
         tf.reset_default_graph()
@@ -69,7 +70,7 @@ class DRAW:
 
         
         if not mode_config is None:
-            for key, val in mode_config:
+            for key, val in mode_config.items():
                 setattr(self, key, val)
 
         self.DO_SHARE = None
@@ -266,7 +267,8 @@ class DRAW:
             sess,
             feed_dict,
             data_dir,
-            model_dir
+            model_dir,
+            i
             ):
 
         """
@@ -286,22 +288,23 @@ class DRAW:
         """
 
         print()
-        print("Saving model and canvasses")
+        print("Saving model and canvasses | epoch: {}".format(i))
 
         canvasses = sess.run(self.canvas_seq, feed_dict)
         canvasses = np.array(canvasses)
         references = np.array(feed_dict[self.x])
+        epoch = "_epoch" + str(i)
         
-        filename = data_dir+"/simulated/canvasses.npy" if self.simulated_mode else data_dir+"/canvasses.npy"
+        filename = data_dir+"/simulated/canvasses"+epoch+".npy" if self.simulated_mode else data_dir+"/canvasses"+epoch+".npy"
         np.save(filename, canvasses)
 
-        model_fn = model_dir+"/draw_attn.ckpt" if self.use_attention else model_dir+"/draw_no_attn.ckpt" 
+        model_fn = model_dir+"/draw_attn"+epoch+".ckpt" if self.use_attention else model_dir+"/draw_no_attn"+epoch+".ckpt" 
         if self.simulated_mode:
-            model_fn = model_dir+"/simulated/draw_attn.ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
+            model_fn = model_dir+"/simulated/draw_attn"+epoch+".ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn"+epoch+".ckpt"
 
         self.saver.save(sess, model_fn)
 
-        ref_fn = data_dir+"/simulated/references.npy" if self.simulated_mode else data_dir+"/references.npy"
+        ref_fn = data_dir+"/simulated/references"+epoch+".npy" if self.simulated_mode else data_dir+"/references"+epoch+".npy"
         np.save(ref_fn, references)
 
 
@@ -311,6 +314,7 @@ class DRAW:
             epochs,
             data_dir,
             model_dir,
+            save_checkpoints=True,
             earlystopping=True,
             checkpoint_fn=None,
             ):
@@ -339,11 +343,7 @@ class DRAW:
 
         for i in range(epochs):
             if self.restore_mode:
-                checkpoint_fn = model_dir+"/draw_attn.ckpt" if self.use_attention else model_dir+"/draw_no_attn.ckpt"
-                if simulated_mode:
-                    checkpoint_fn = model_dir+"/simulated/draw_attn.ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn.ckpt"
-
-                saver.restore(sess, checkpoint_fn)
+                self.saver.restore(sess, checkpoint_fn)
                 break
 
             Lxs = [0]*train_iters
@@ -404,7 +404,9 @@ class DRAW:
                         return all_lx, all_lz 
 
                 to_average = [0] * n_mvavg
-                self.storeResult(sess, feed_dict, data_dir, model_dir)
+
+                if save_checkpoints: 
+                    self.storeResult(sess, feed_dict, data_dir, model_dir, i)
 
         return all_lx, all_lz
 
