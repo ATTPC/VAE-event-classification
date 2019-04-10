@@ -8,21 +8,28 @@ from draw import DRAW
 from counter import *
 
 
-T = 15
-enc_size = 800
-dec_size = 500
-latent_dim = 50
+T = 6
+enc_size = 600
+dec_size = 600
+latent_dim = 3
 
 batch_size = 50
-train_data = np.load("../data/simulated/pr_train_simulated.npy")
-test_data = np.load("../data/simulated/pr_test_simulated.npy")
 
+all_data = np.load("../data/processed/all_0130.npy")
 #all_data = np.concatenate((train_data, test_data), axis=0)
 
-delta_range = np.linspace(0.8, 1.1, 10)
-N_range = np.arange(10, 50, 5)
+treshold_value = 0.4
+treshold_data = True
+
+if treshold_data:
+	all_data[all_data < treshold_value] = 0
+
+delta_range = np.linspace(0.8, 1.1, 6) 
+N_range = np.arange(55, 105, 10)
+N_range = N_range[::-1]
+
 repeats = 2
-epochs = 40
+epochs = 20
 
 loss_record_shape = (
         len(delta_range),
@@ -40,7 +47,6 @@ hyperparam_vals = np.array((
         epochs
         ))
 
-np.save("../loss_records/hyperparam_vals_{}.npy".format(RUN_COUNT), hyperparam_vals)
 
 loss_record = np.zeros(loss_record_shape)
 
@@ -55,6 +61,10 @@ for i, delta in enumerate(delta_range):
 
             read_N = N
             write_N = N
+            
+            print()
+            print("--------------------")
+            print("delta: ", delta, " N : ", N)
 
             array_delta_w = np.zeros((batch_size, 1))
             array_delta_w.fill(delta_write)
@@ -72,6 +82,7 @@ for i, delta in enumerate(delta_range):
                         "delta_r": array_delta_r,
                     }
 
+            mode_config = {"simulated_mode": False}
 
             draw_model = DRAW(
                     T,
@@ -79,8 +90,9 @@ for i, delta in enumerate(delta_range):
                     enc_size,
                     latent_dim,
                     batch_size,
-                    train_data,
-                    attn_config=attn_config
+                    all_data,
+                    attn_config=attn_config,
+                    mode_config=mode_config
                     )
 
             graph_kwds = {
@@ -106,7 +118,15 @@ for i, delta in enumerate(delta_range):
             data_dir = "../drawing"
             model_dir = "../models"
 
-            lx, lz, = draw_model.train(sess, epochs, data_dir, model_dir, )
+            lx, lz, = draw_model.train(
+                    sess,
+                    epochs,
+                    data_dir, 
+                    model_dir, 
+                    earlystopping=False,
+                    save_checkpoints=False,
+                    )
+
             loss_record[i, j, k, 0] = lx
             loss_record[i, j, k, 1] = lz
 
@@ -117,6 +137,7 @@ for i, delta in enumerate(delta_range):
             sess.close()
 
 np.save("../loss_records/delta_opt_{}.npy".format(RUN_COUNT) ,loss_record)
+np.save("../loss_records/hyperparam_vals_{}.npy".format(RUN_COUNT), hyperparam_vals)
 
 with open("counter.py", "w") as fo:
     fo.write("RUN_COUNT = {}".format(RUN_COUNT + 1))
