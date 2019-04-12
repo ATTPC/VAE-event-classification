@@ -565,7 +565,7 @@ class DRAW:
         Fx_m, Fy_m = self.filters(*params_m, self.write_N)
         return self.write_attn(h_dec, Fx_m, Fy_m, params_m[-1])
 
-    def generateLatent(self, sess, save_dir, X_tup):
+    def generateLatent(self, sess, save_dir, X_tup, save=True):
         """
         Parameters
         ----------
@@ -583,9 +583,8 @@ class DRAW:
         recons_vals = []
         decoder_states = []
 
-        for i in range(2):
+        for j, X in enumerate(X_tup):
 
-            X = X_tup[i]
             n_latent = (X.shape[0]//self.batch_size)*self.batch_size
             latent_values = np.zeros((self.T, n_latent, self.latent_dim))
             dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
@@ -609,24 +608,30 @@ class DRAW:
             recons_vals.append(reconstructions)
             decoder_states.append(dec_state_array)
 
-        for i in range(2):
 
-            fn = "train_latent.npy" if i == 0 else "test_latent.npy"
-            r_fn = "train_reconst.npy" if i == 0 else "test_reconst.npy"
-            dec_fn = "train_decoder_states.npy" if i == 0 else "test_decoder_states.npy"
+        if save:
+            for i, X in enumerate(X_tup):
 
-            l = lat_vals[i]
-            r = recons_vals[i]
-            d = decoder_states[i]
-            
-            if not self.simulated_mode:
-                np.save(save_dir+"/latent/" + fn, l)
-                np.save(save_dir+"/" + r_fn, r)
-                np.save(save_dir+"/" + dec_fn, d)
-            else:
-                np.save(save_dir+"/simulated/latent/" + fn, l)
-                np.save(save_dir+"/simulated/"+ r_fn, r)
-                np.save(save_dir+"/simulated/" + dec_fn, d)
+                fn = "train_latent.npy" if i == 0 else "test_latent.npy"
+                r_fn = "train_reconst.npy" if i == 0 else "test_reconst.npy"
+                dec_fn = "train_decoder_states.npy" if i == 0 else "test_decoder_states.npy"
+
+                l = lat_vals[i]
+                r = recons_vals[i]
+                d = decoder_states[i]
+                
+                if not self.simulated_mode:
+                    np.save(save_dir+"/latent/" + fn, l)
+                    np.save(save_dir+"/" + r_fn, r)
+                    np.save(save_dir+"/" + dec_fn, d)
+                else:
+                    np.save(save_dir+"/simulated/latent/" + fn, l)
+                    np.save(save_dir+"/simulated/"+ r_fn, r)
+                    np.save(save_dir+"/simulated/" + dec_fn, d)
+
+        else:
+            return lat_vals, recons_vals, decoder_states
+
 
 
     def generateSamples(self, save_dir, rerun_latent=False, load_dir=None):
