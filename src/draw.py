@@ -1,5 +1,12 @@
 import numpy as np 
 import tensorflow as tf
+
+from keras.layers import Flatten, Dense, Input
+from keras.losses import categorical_crossentropy
+from keras.models import Model
+
+from sklearn.metrics import accuracy_score
+
 from batchmanager import BatchManager
 
 
@@ -25,8 +32,11 @@ class DRAW:
             latent_dim,
             batch_size,
             X,
+            X_classifier=None,
+            Y_classifier=None,
             attn_config=None,
             mode_config=None,
+            train_classifier=None,
             run=None
             ):
 
@@ -39,6 +49,10 @@ class DRAW:
         self.batch_size = batch_size 
 
         self.X = X 
+        self.X_c = X_classifier
+        self.Y_c = Y_classifier
+        
+        self.train_classifier=train_classifier
         self.eps = 1e-8
 
         self.data_shape = self.X.shape
@@ -168,6 +182,38 @@ class DRAW:
             c_prev = self.canvas_seq[t]
             self.DO_SHARE = True
 
+        if self.train_classifier: 
+            
+            z_stacked = tf.stack(self.z_seq)
+            z_stacked = tf.transpose(self.z_seq, perm=[1, 0, 2])
+            Z = tf.reshape(z_stacked, (self.batch_size, self.T*self.latent_dim))
+
+            with tf.variable_scope("logreg"):
+                tmp = self.linear(
+                        Z,
+                        self.Y_c.shape[1],
+                        )
+
+            self.logits = tf.nn.softmax(tmp)
+
+
+    def predict(self, sess, X):
+        tmp = {self.x: X}
+        return np.argmax(sess.run(self.logits, tmp), 1)
+
+
+    def predict_proba(self, sess, X):
+        tmp = {self.x:  X}
+        return sess.run(self.logits, tmp)
+
+
+    def score(self, sess, X, y, metric=accuracy_score):
+        predicted = self.predict(sess, X)
+        t  = np.argmax(y, 1)
+        return metric(t, predicted)
+
+
+
     def _ModelLoss(self, reconst_loss=None, include_KL=True):
 
         """
@@ -208,6 +254,15 @@ class DRAW:
         #reg_var = tf.sum(reg_var)
         cost += tf.losses.get_regularization_loss()
         self.cost = cost
+
+        if self.train_classifier:
+            self.y_batch = tf.placeholder(tf.float32, shape=(self.batch_size, self.Y_c.shape[1]))
+            self.classifier_cost = tf.reduce_mean(
+                                tf.reduce_sum(
+                                    self.binary_crossentropy(self.y_batch, self.logits)
+                                    )
+                                )
+
 
 
     def binary_crossentropy(self, t, o):
@@ -258,6 +313,17 @@ class DRAW:
             self.dec_state_seq,
             self.train_op
             ])
+
+        if self.train_classifier:
+
+            classifier_grads = optimizer.compute_gradients(self.classifier_cost)
+
+            for i, (g, v) in enumerate(classifier_grads):
+                if g is not None:
+                    classifier_grads[i] = (tf.clip_by_norm(g, 5), v)
+
+            self.classifier_op = optimizer.apply_gradients(classifier_grads)
+            self.clf_fetches = [self.classifier_cost, self.classifier_op]
 
         self.grad_op = True
 
@@ -341,6 +407,10 @@ class DRAW:
         all_lx = np.zeros(epochs)
         all_lz = np.zeros(epochs)
 
+        if self.train_classifier:
+            clf_train_iters = self.X_c.shape[0]//self.batch_size
+            all_clf_loss = np.zeros(epochs)
+
         for i in range(epochs):
             if self.restore_mode:
                 self.saver.restore(sess, checkpoint_fn)
@@ -351,6 +421,9 @@ class DRAW:
 
             bm_inst = BatchManager(self.n_data, self.batch_size, self.n_input)
 
+            if self.train_classifier:
+                clf_bm_inst = BatchManager(self.X_c.shape[0], self.batch_size, self.n_input)
+
             for j in range(train_iters):
                 batch = self.X[bm_inst.fetchMinibatch()]
                 batch = batch.reshape(self.batch_size, self.n_input)
@@ -359,20 +432,55 @@ class DRAW:
                 results = sess.run(self.fetches, feed_dict)
                 Lxs[j], Lzs[j], _, _, _, = results
 
-        #        with tf.variable_scope("sigma", reuse=DO_SHARE):
-        #            w = tf.get_variable("w",)
-        #            print(sess.run(w))
-        #
             all_lz[i] = tf.reduce_mean(Lzs).eval()
             all_lx[i] = tf.reduce_mean(Lxs).eval()
 
-            print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
-                    i,
-                    all_lx[i],
-                    all_lz[i]
-                    ),
-                    end="",
-                    )
+            if self.train_classifier:
+                loglosses = [0]*clf_train_iters
+
+                for j in range(clf_train_iters):
+
+                    batch_ind = clf_bm_inst.fetchMinibatch()
+                    clf_batch = self.X_c[batch_ind]
+                    clf_batch = clf_batch.reshape(self.batch_size, self.n_input)
+
+                    t_batch = self.Y_c[batch_ind]
+
+                    clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch}
+                    clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict)
+                    loglosses[j] = clf_cost
+
+                all_clf_loss[i] = tf.reduce_mean(loglosses).eval()
+
+            if self.train_classifier:
+                
+                clf_acc = 0
+                for j in range(clf_train_iters):
+                    to_pred = self.X_c[j*self.batch_size:(j+1)*self.batch_size]
+                    to_pred = to_pred.reshape((self.batch_size, self.n_input))
+
+                    targets = self.Y_c[j*self.batch_size:(j+1)*self.batch_size]
+                    clf_acc += self.score(sess, to_pred, targets)
+
+                clf_acc /= clf_train_iters
+
+                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | acc {:5.2f} ".format(
+                        i,
+                        all_lx[i],
+                        all_lz[i],
+                        all_clf_loss[i],
+                        clf_acc
+                        ),
+                        )
+            else:
+                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
+                        i,
+                        all_lx[i],
+                        all_lz[i]
+                        ),
+                        end="",
+                        )
+
 
             if all_lz[i] < 0:
                 print("broken training")
