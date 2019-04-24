@@ -111,3 +111,9 @@ venv.bak/
 
 # drawing data
 /drawing/*
+
+# cluster files 
+/cluster/*
+
+# label files
+/labels/*
