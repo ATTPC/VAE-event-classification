@@ -465,7 +465,7 @@ class DRAW:
 
                         batch_ind = clf_bm_inst.fetchMinibatch()
                         clf_batch = self.X_c[batch_ind]
-                        clf_batch = clf_batch.reshape(self.batch_size, self.n_input)
+                        clf_batch = clf_batch.reshape(minibatch_size, self.n_input)
 
                         t_batch = self.Y_c[batch_ind]
 
