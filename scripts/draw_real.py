@@ -4,7 +4,14 @@ import matplotlib
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import numpy as np
+import h5py
 import os
+
+from sklearn.model_selection import  cross_val_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+
+from keras.utils import to_categorical
 
 import sys
 sys.path.append("../src")
@@ -15,16 +22,57 @@ matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
 
-T = 8
-enc_size = 1500
-dec_size = 900
-latent_dim = 6
+def longform_latent(latent,):
+    longform_samples = np.zeros((
+                        latent.shape[1], 
+                        latent.shape[0]*latent.shape[2]
+                        ))
+
+    latent_dim = latent.shape[2]
+
+    for i, evts in enumerate(latent):
+        longform_samples[:, i*latent_dim:(i+1)*latent_dim] = evts
+
+    return longform_samples
+
+
+def compute_accuracy(X, y):
+
+   #model = LogisticRegression(
+   #         solver="liblinear",
+   #         multi_class="ovr",
+   #         class_weight="balanced"
+   #     )
+
+    mlp = MLPClassifier(
+            max_iter=1000,
+            batch_size=10,
+            hidden_layer_sizes=(80, 30, 10),
+            early_stopping=True,
+            learning_rate_init=0.01
+        )
+
+    mlp.fit(X, y)
+    #model.fit(X, y)
+
+    #logreg_score = np.average(cross_val_score(model, X, y, cv=4))
+    mlp_score = np.average(cross_val_score(mlp, X, y, cv=4))
+
+    return mlp_score
+
+T = 7
+enc_size = 1200
+dec_size = 600
+latent_dim = 10
 epochs = 100
 
 treshold_value = 0.4
 treshold_data = False
 
-batch_size = 50
+batch_size = 86
+
+with h5py.File("../data/images.h5", "r") as fo:
+    train_targets = np.array(fo["train_targets"])
 
 all_0130 = np.load("../data/processed/all_0130.npy")
 #all_0210 = np.load("../data/processed/all_0210.npy")
@@ -42,9 +90,10 @@ train_test = np.concatenate((train_data, test_data))
 
 if treshold_data:
 	train_test[train_test < treshold_value] = 0
+	train_data[train_data < treshold_value] = 0 
 
-delta = 0.92
-N = 45
+delta = 0.98
+N = 65
 
 delta_write = delta
 delta_read = delta
@@ -71,6 +120,8 @@ attn_config = {
 mode_config = {"simulated_mode": False}
 
 with tf.device("/gpu:2"):
+    train_targets = to_categorical(train_targets)
+
     draw_model = DRAW(
         T,
         dec_size,
@@ -78,8 +129,11 @@ with tf.device("/gpu:2"):
         latent_dim,
         batch_size,
         all_data,
+        X_classifier=train_data,
+        Y_classifier=train_targets,
         attn_config=attn_config,
         mode_config=mode_config,
+        train_classifier=True
     )
 
     graph_kwds = {
@@ -88,7 +142,7 @@ with tf.device("/gpu:2"):
 
     loss_kwds = {
         "reconst_loss": None,
-        "include_KL": False
+        "include_KL": True
     }
 
     draw_model.CompileModel(graph_kwds, loss_kwds)
@@ -108,9 +162,20 @@ with tf.device("/gpu:2"):
 
     lx, lz, = draw_model.train(
         sess, epochs, data_dir, model_dir, earlystopping=False)
-    draw_model.X = train_test
 
+    draw_model.X = train_data
     draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
+
+    latent_values , _, _ = draw_model.generateLatent(sess, "../drawing", (train_data, ), save=False)
+    latent_values = longform_latent(latent_values[0])
+
+    #accuracies = compute_accuracy(latent_values, train_targets[:-1])
+
+    #print()
+
+    #print("--------------------")
+    #print(accuracies)
+    #print("---------------------")
 
     draw_model.generateSamples("../drawing", "../drawing")
 
