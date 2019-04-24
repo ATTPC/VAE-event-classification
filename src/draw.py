@@ -441,7 +441,6 @@ class DRAW:
             Lxs = [0]*train_iters
             Lzs = [0]*train_iters
             logloss_train = []
-            logloss_test = []
 
             bm_inst = BatchManager(self.n_data, minibatch_size, self.n_input)
 
@@ -455,15 +454,13 @@ class DRAW:
 
             for j in range(train_iters):
                 batch = self.X[bm_inst.fetchMinibatch()]
-                batch = batch.reshape(self.batch_size, self.n_input)
+                batch = batch.reshape(minibatch_size, self.n_input)
 
                 feed_dict = {self.x: batch, self.batch_size: minibatch_size}
                 results = sess.run(self.fetches, feed_dict)
                 Lxs[j], Lzs[j], _, _, _, = results
 
                 if self.train_classifier:
-                    loglosses = [0]*clf_train_iters
-
                     if  (j % train_interval) == 0:
 
                         batch_ind = clf_bm_inst.fetchMinibatch()
@@ -474,7 +471,7 @@ class DRAW:
 
                         clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch, self.batch_size: minibatch_size}
                         clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict)
-                        loglosses[j] = clf_cost
+                        logloss_train.append(clf_cost)
 
             all_lz[i] = tf.reduce_mean(Lzs).eval()
             all_lx[i] = tf.reduce_mean(Lxs).eval()
