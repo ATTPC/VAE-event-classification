@@ -191,6 +191,7 @@ for i, delta in enumerate(delta_range):
                         )
                 
                 if any(np.isnan(lx)) or any(np.isnan(lz)):
+                        sess.close()
                         continue
 
                 print()

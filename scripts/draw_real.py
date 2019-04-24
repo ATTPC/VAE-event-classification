@@ -15,14 +15,14 @@ matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
 
-T = 7
-enc_size = 900
+T = 8
+enc_size = 1500
 dec_size = 900
-latent_dim = 3
+latent_dim = 6
 epochs = 100
 
 treshold_value = 0.4
-treshold_data = True
+treshold_data = False
 
 batch_size = 50
 
@@ -43,8 +43,8 @@ train_test = np.concatenate((train_data, test_data))
 if treshold_data:
 	train_test[train_test < treshold_value] = 0
 
-delta = 1.04
-N = 65
+delta = 0.92
+N = 45
 
 delta_write = delta
 delta_read = delta
