@@ -5,9 +5,14 @@ from keras.layers import Flatten, Dense, Input
 from keras.losses import categorical_crossentropy
 from keras.models import Model
 
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.model_selection import train_test_split
+
+import signal
+import sys
 
 from batchmanager import BatchManager
+
 
 
 class DRAW:
@@ -30,27 +35,38 @@ class DRAW:
             dec_size,
             enc_size,
             latent_dim,
-            batch_size,
             X,
             X_classifier=None,
             Y_classifier=None,
             attn_config=None,
             mode_config=None,
             train_classifier=None,
+            test_split=0,
             run=None
             ):
 
         tf.reset_default_graph()
+
+        # adding save on interrupt
+        signal.signal(signal.SIGINT, self.signal_handler)
         
         self.T = T
         self.dec_size = dec_size 
         self.enc_size = enc_size
         self.latent_dim = latent_dim
-        self.batch_size = batch_size 
+        
+        # set batch size as placeholder to be fed with each run
+        self.batch_size = tf.placeholder(tf.int32, [], "batch_size") 
 
         self.X = X 
-        self.X_c = X_classifier
-        self.Y_c = Y_classifier
+        
+        test_split = test_split if test_split != 0 else 0.33
+        self.X_c, self.X_c_test, self.Y_c, self.Y_c_test = train_test_split(
+                                                X_classifier,
+                                                Y_classifier,
+                                                test_size=test_split,
+                                                random_state=42
+                                            )
         
         self.train_classifier=train_classifier
         self.eps = 1e-8
@@ -128,7 +144,7 @@ class DRAW:
             initializer=tf.initializers.glorot_normal
             ):
 
-        self.x = tf.placeholder(tf.float32, shape=(self.batch_size, self.n_input))
+        self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
 
         self.encoder = tf.nn.rnn_cell.LSTMCell(
             self.enc_size,
@@ -198,19 +214,19 @@ class DRAW:
 
 
     def predict(self, sess, X):
-        tmp = {self.x: X}
+        tmp = {self.x: X, self.batch_size: X.shape[0]}
         return np.argmax(sess.run(self.logits, tmp), 1)
 
 
     def predict_proba(self, sess, X):
-        tmp = {self.x:  X}
+        tmp = {self.x:  X, self.batch_size: X.shape[0]}
         return sess.run(self.logits, tmp)
 
 
-    def score(self, sess, X, y, metric=accuracy_score):
+    def score(self, sess, X, y, metric=accuracy_score, metric_kwds={}):
         predicted = self.predict(sess, X)
         t  = np.argmax(y, 1)
-        return metric(t, predicted)
+        return metric(t, predicted, **metric_kwds)
 
 
 
@@ -256,7 +272,7 @@ class DRAW:
         self.cost = cost
 
         if self.train_classifier:
-            self.y_batch = tf.placeholder(tf.float32, shape=(self.batch_size, self.Y_c.shape[1]))
+            self.y_batch = tf.placeholder(tf.float32, shape=(None, self.Y_c.shape[1]))
             self.classifier_cost = tf.reduce_mean(
                                 tf.reduce_sum(
                                     self.binary_crossentropy(self.y_batch, self.logits)
@@ -380,6 +396,7 @@ class DRAW:
             epochs,
             data_dir,
             model_dir,
+            minibatch_size,
             save_checkpoints=True,
             earlystopping=True,
             checkpoint_fn=None,
@@ -399,7 +416,10 @@ class DRAW:
         self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
 
-        train_iters = self.data_shape[0] // self.batch_size
+        #set session as self attribute to be available from sigint call
+        self.sess = sess
+
+        train_iters = self.data_shape[0] // minibatch_size
         n_mvavg = 5
         moving_average = [0] * (epochs // n_mvavg)
         to_average = [0]*n_mvavg
@@ -408,7 +428,9 @@ class DRAW:
         all_lz = np.zeros(epochs)
 
         if self.train_classifier:
-            clf_train_iters = self.X_c.shape[0]//self.batch_size
+            clf_train_iters = self.X_c.shape[0]//minibatch_size
+            train_interval = 20
+
             all_clf_loss = np.zeros(epochs)
 
         for i in range(epochs):
@@ -418,58 +440,74 @@ class DRAW:
 
             Lxs = [0]*train_iters
             Lzs = [0]*train_iters
+            logloss_train = []
+            logloss_test = []
 
-            bm_inst = BatchManager(self.n_data, self.batch_size, self.n_input)
+            bm_inst = BatchManager(self.n_data, minibatch_size, self.n_input)
 
             if self.train_classifier:
-                clf_bm_inst = BatchManager(self.X_c.shape[0], self.batch_size, self.n_input)
+                clf_bm_inst = BatchManager(self.X_c.shape[0], minibatch_size, self.n_input)
+
+
+            """
+            Epoch train iteration
+            """
 
             for j in range(train_iters):
                 batch = self.X[bm_inst.fetchMinibatch()]
                 batch = batch.reshape(self.batch_size, self.n_input)
 
-                feed_dict = {self.x: batch}
+                feed_dict = {self.x: batch, self.batch_size: minibatch_size}
                 results = sess.run(self.fetches, feed_dict)
                 Lxs[j], Lzs[j], _, _, _, = results
+
+                if self.train_classifier:
+                    loglosses = [0]*clf_train_iters
+
+                    if  (j % train_interval) == 0:
+
+                        batch_ind = clf_bm_inst.fetchMinibatch()
+                        clf_batch = self.X_c[batch_ind]
+                        clf_batch = clf_batch.reshape(self.batch_size, self.n_input)
+
+                        t_batch = self.Y_c[batch_ind]
+
+                        clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch, self.batch_size: minibatch_size}
+                        clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict)
+                        loglosses[j] = clf_cost
 
             all_lz[i] = tf.reduce_mean(Lzs).eval()
             all_lx[i] = tf.reduce_mean(Lxs).eval()
 
+            """Compute classifier performance """
+
             if self.train_classifier:
-                loglosses = [0]*clf_train_iters
-
-                for j in range(clf_train_iters):
-
-                    batch_ind = clf_bm_inst.fetchMinibatch()
-                    clf_batch = self.X_c[batch_ind]
-                    clf_batch = clf_batch.reshape(self.batch_size, self.n_input)
-
-                    t_batch = self.Y_c[batch_ind]
-
-                    clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch}
-                    clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict)
-                    loglosses[j] = clf_cost
 
                 all_clf_loss[i] = tf.reduce_mean(loglosses).eval()
 
-            if self.train_classifier:
-                
-                clf_acc = 0
-                for j in range(clf_train_iters):
-                    to_pred = self.X_c[j*self.batch_size:(j+1)*self.batch_size]
-                    to_pred = to_pred.reshape((self.batch_size, self.n_input))
+                train_tup = (self.X_c, self.Y_c)
+                test_tup = (self.X_c_test, self.Y_c_test)
+                scores = [0, 0]
 
-                    targets = self.Y_c[j*self.batch_size:(j+1)*self.batch_size]
-                    clf_acc += self.score(sess, to_pred, targets)
+                for i, tup in enumerate([train_tup, test_tup]):
 
-                clf_acc /= clf_train_iters
+                    X, y = tup
+                    n_to_pred = X.shape[0]
 
-                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | acc {:5.2f} ".format(
+                    to_pred = X.reshape((n_to_pred, self.n_input))
+                    targets = Y
+
+                    scores[i] = self.score(sess, to_pred, targets, metric=f1_score, metric_kwds={"average": None})
+
+
+                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
+                        train score {:5.2f}  | test score {:5.2f}".format(
                         i,
                         all_lx[i],
                         all_lz[i],
                         all_clf_loss[i],
-                        clf_acc
+                        scores[0],
+                        scores[1]
                         ),
                         )
             else:
@@ -673,7 +711,7 @@ class DRAW:
         Fx_m, Fy_m = self.filters(*params_m, self.write_N)
         return self.write_attn(h_dec, Fx_m, Fy_m, params_m[-1])
 
-    def generateLatent(self, sess, save_dir, X_tup, save=True):
+    def generate_latent(self, sess, save_dir, X_tup, save=True):
         """
         Parameters
         ----------
@@ -791,6 +829,16 @@ class DRAW:
             np.save(save_dir+"/simulated/generated/samples.npy", canvasses)
             np.save(save_dir+"/simulated/generated/latent.npy", np.array(z_seq))
 
+
+
+    def signal_handler(self, signal, frame):
+        """Function to be called when Ctrl + C is hit"""
+
+        if self.train_classifier:
+            self.generate_latent(self.sess, "~/tmp", (self.X_c, ) )
+
+        self.sess.close()
+        sys.exit(0)
 
 if __name__ == "__main__":
 
