@@ -61,9 +61,9 @@ def compute_accuracy(X, y):
     return mlp_score
 
 T = 7
-enc_size = 1200
-dec_size = 600
-latent_dim = 10
+enc_size = 1500
+dec_size = 1000
+latent_dim = 6
 epochs = 100
 
 treshold_value = 0.4
@@ -127,7 +127,6 @@ with tf.device("/gpu:2"):
         dec_size,
         enc_size,
         latent_dim,
-        batch_size,
         all_data,
         X_classifier=train_data,
         Y_classifier=train_targets,
@@ -161,7 +160,7 @@ with tf.device("/gpu:2"):
     model_dir = "../models"
 
     lx, lz, = draw_model.train(
-        sess, epochs, data_dir, model_dir, earlystopping=False)
+        sess, epochs, data_dir, model_dir, batch_size, earlystopping=False)
 
     draw_model.X = train_data
     draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
