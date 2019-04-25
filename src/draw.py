@@ -56,7 +56,6 @@ class DRAW:
         self.latent_dim = latent_dim
         
         # set batch size as placeholder to be fed with each run
-        self.batch_size = tf.placeholder(tf.int32, [], "batch_size") 
 
         self.X = X 
         
@@ -145,6 +144,7 @@ class DRAW:
             ):
 
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
+        self.batch_size = tf.shape(self.x)[0]
 
         self.encoder = tf.nn.rnn_cell.LSTMCell(
             self.enc_size,
@@ -202,7 +202,7 @@ class DRAW:
             
             z_stacked = tf.stack(self.z_seq)
             z_stacked = tf.transpose(self.z_seq, perm=[1, 0, 2])
-            Z = tf.reshape(z_stacked, (self.batch_size, self.T*self.latent_dim))
+            Z = tf.reshape(z_stacked, (-1, self.T*self.latent_dim))
 
             with tf.variable_scope("logreg"):
                 tmp = self.linear(
@@ -214,12 +214,12 @@ class DRAW:
 
 
     def predict(self, sess, X):
-        tmp = {self.x: X, self.batch_size: X.shape[0]}
+        tmp = {self.x: X,}# self.batch_size: X.shape[0]}
         return np.argmax(sess.run(self.logits, tmp), 1)
 
 
     def predict_proba(self, sess, X):
-        tmp = {self.x:  X, self.batch_size: X.shape[0]}
+        tmp = {self.x:  X, }#self.batch_size: X.shape[0]}
         return sess.run(self.logits, tmp)
 
 
@@ -428,9 +428,8 @@ class DRAW:
         all_lz = np.zeros(epochs)
 
         if self.train_classifier:
-            clf_train_iters = self.X_c.shape[0]//minibatch_size
-            train_interval = 20
-
+            train_interval = 10
+            clf_batch_size = self.X_c.shape[0]//(train_iters//train_interval)
             all_clf_loss = np.zeros(epochs)
 
         for i in range(epochs):
@@ -438,38 +437,40 @@ class DRAW:
                 self.saver.restore(sess, checkpoint_fn)
                 break
 
-            Lxs = [0]*train_iters
-            Lzs = [0]*train_iters
+            Lxs = [] 
+            Lzs = [] 
             logloss_train = []
 
-            bm_inst = BatchManager(self.n_data, minibatch_size, self.n_input)
+            bm_inst = BatchManager(self.n_data, minibatch_size)
 
             if self.train_classifier:
-                clf_bm_inst = BatchManager(self.X_c.shape[0], minibatch_size, self.n_input)
-
+                clf_bm_inst = BatchManager(self.X_c.shape[0], clf_batch_size)
 
             """
             Epoch train iteration
             """
 
-            for j in range(train_iters):
-                batch = self.X[bm_inst.fetchMinibatch()]
-                batch = batch.reshape(minibatch_size, self.n_input)
+            for j, ind in enumerate(bm_inst):
+                batch = self.X[ind]
+                batch = batch.reshape(np.size(ind), self.n_input)
 
-                feed_dict = {self.x: batch, self.batch_size: minibatch_size}
+                feed_dict = {self.x: batch, }#self.batch_size: minibatch_size}
                 results = sess.run(self.fetches, feed_dict)
-                Lxs[j], Lzs[j], _, _, _, = results
+                Lx, Lz, _, _, _, = results
+
+                Lxs.append(Lx)
+                Lzs.append(Lz)
 
                 if self.train_classifier:
                     if  (j % train_interval) == 0:
-
-                        batch_ind = clf_bm_inst.fetchMinibatch()
+                        batch_ind = next(clf_bm_inst)
+                        #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
                         clf_batch = self.X_c[batch_ind]
-                        clf_batch = clf_batch.reshape(minibatch_size, self.n_input)
+                        clf_batch = clf_batch.reshape(np.size(batch_ind), self.n_input)
 
                         t_batch = self.Y_c[batch_ind]
 
-                        clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch, self.batch_size: minibatch_size}
+                        clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch,}# self.batch_size: minibatch_size}
                         clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict)
                         logloss_train.append(clf_cost)
 
@@ -480,25 +481,25 @@ class DRAW:
 
             if self.train_classifier:
 
-                all_clf_loss[i] = tf.reduce_mean(loglosses).eval()
+                all_clf_loss[i] = tf.reduce_mean(logloss_train).eval()
 
                 train_tup = (self.X_c, self.Y_c)
                 test_tup = (self.X_c_test, self.Y_c_test)
                 scores = [0, 0]
 
-                for i, tup in enumerate([train_tup, test_tup]):
+                for k, tup in enumerate([train_tup, test_tup]):
 
-                    X, y = tup
+                    X, Y = tup
                     n_to_pred = X.shape[0]
 
                     to_pred = X.reshape((n_to_pred, self.n_input))
                     targets = Y
 
-                    scores[i] = self.score(sess, to_pred, targets, metric=f1_score, metric_kwds={"average": None})
+                    scores[k] = self.score(sess, to_pred, targets, metric=f1_score, metric_kwds={"average": None})
 
 
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
-                        train score {:5.2f}  | test score {:5.2f}".format(
+                        train score {}  | test score {}".format(
                         i,
                         all_lx[i],
                         all_lz[i],
@@ -654,13 +655,13 @@ class DRAW:
         A, MU_X = tf.meshgrid(a, mu_x)  # batch_size, N * H
         B, MU_Y = tf.meshgrid(b, mu_y)
 
-        A = tf.reshape(A, [self.batch_size, N, self.H])
-        B = tf.reshape(B, [self.batch_size, N, self.W])
+        A = tf.reshape(A, [-1, N, self.H])
+        B = tf.reshape(B, [-1, N, self.W])
 
-        MU_X = tf.reshape(MU_X, [self.batch_size, N, self.H])
-        MU_Y = tf.reshape(MU_Y, [self.batch_size, N, self.W])
+        MU_X = tf.reshape(MU_X, [-1, N, self.H])
+        MU_Y = tf.reshape(MU_Y, [-1, N, self.W])
 
-        sigma_sq = tf.reshape(sigma_sq, [self.batch_size, 1, 1])
+        sigma_sq = tf.reshape(sigma_sq, [-1, 1, 1])
 
         Fx = tf.exp(- tf.square(A - MU_X)/(2*sigma_sq))
         Fy = tf.exp(- tf.square(B - MU_Y)/(2*sigma_sq))
@@ -674,8 +675,8 @@ class DRAW:
     def read_attn(self, x, xhat, h_dec_prev, Fx, Fy, gamma, N):
         Fx_t = tf.transpose(Fx, perm=[0, 2, 1])
 
-        x = tf.reshape(x, [self.batch_size, 128, 128])
-        xhat = tf.reshape(xhat, [self.batch_size, 128, 128])
+        x = tf.reshape(x, [-1, 128, 128])
+        xhat = tf.reshape(xhat, [-1, 128, 128])
 
         FyxFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
         FyxhatFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
@@ -688,7 +689,7 @@ class DRAW:
         with tf.variable_scope("writeW", reuse=self.DO_SHARE):
             w = self.linear(h_dec, self.write_N_sq, tf.contrib.layers.l1_regularizer, lmbd=1e-5)
         
-        w = tf.reshape(w, [self.batch_size, self.write_N, self.write_N])
+        w = tf.reshape(w, [-1, self.write_N, self.write_N])
         Fy_t = tf.transpose(Fy, perm=[0, 2, 1])
 
         tmp = tf.matmul(w, Fx)
@@ -733,19 +734,16 @@ class DRAW:
             dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
 
-            for i in range(X.shape[0]//self.batch_size):
-                start = i * self.batch_size
-                end = (i+1) * self.batch_size
-                to_feed = X[start:end].reshape((self.batch_size, self.H*self.W))
-                feed_dict = {self.x: to_feed}
+            to_feed = X.reshape((X.shape[0], self.H*self.W))
+            feed_dict = {self.x: to_feed, self.batch_size: X.shape[0]}
 
-                _, _, z_seq, dec_state_seq, _, = sess.run(self.fetches, feed_dict)
+            _, _, z_seq, dec_state_seq, _, = sess.run(self.fetches, feed_dict)
 
-                canvasses = sess.run(self.canvas_seq, feed_dict)
+            canvasses = sess.run(self.canvas_seq, feed_dict)
 
-                latent_values[:, start:end, :] = z_seq
-                reconstructions[:, start:end, :] = np.array(canvasses)
-                dec_state_array[:, :, start:end, :] = dec_state_seq
+            latent_values = z_seq
+            reconstructions = np.array(canvasses)
+            dec_state_array = dec_state_seq
             
             lat_vals.append(latent_values)
             recons_vals.append(reconstructions)
@@ -777,8 +775,8 @@ class DRAW:
 
 
 
-    def generateSamples(self, save_dir, rerun_latent=False, load_dir=None):
-        n_samples = self.batch_size
+    def generate_samples(self, save_dir, n_samples=100, rerun_latent=False, load_dir=None):
+
         z_seq = [0]*self.T
 
         if rerun_latent:
@@ -792,17 +790,17 @@ class DRAW:
             decoder_states = np.load(dec_state_fn)
             latent_samples = np.load(latent_fn)
         
-        dec_state = self.decoder.zero_state(self.batch_size, tf.float32)
-        h_dec = tf.zeros((self.batch_size, self.dec_size))
-        c_prev = tf.zeros((self.batch_size, self.n_input))
+        dec_state = self.decoder.zero_state(n_samples, tf.float32)
+        h_dec = tf.zeros((n_samples, self.dec_size))
+        c_prev = tf.zeros((n_samples, self.n_input))
 
         for t in range(self.T):
 
             if not rerun_latent:
                 mu, sigma = (0, 1) if t<1 else (0., 1)
-                sample = np.random.normal(mu, sigma, (self.batch_size, self.latent_dim)).astype(np.float32)
+                sample = np.random.normal(mu, sigma, (n_samples, self.latent_dim)).astype(np.float32)
             else:
-                sample = latent_samples[t, batch_size:2*batch_size, :].reshape((self.batch_size, self.latent_dim)).astype(np.float32)
+                sample = latent_samples[t, batch_size:2*batch_size, :].reshape((n_samples, self.latent_dim)).astype(np.float32)
 
             z_seq[t] = sample
             z = tf.convert_to_tensor(sample)
