@@ -5,6 +5,10 @@ from keras.layers import Flatten, Dense, Input
 from keras.losses import categorical_crossentropy
 from keras.models import Model
 
+from keras.layers import Conv2D, Conv2DTranspose, Flatten, MaxPool2D
+
+from keras import backend as K
+
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 
@@ -36,11 +40,15 @@ class DRAW:
             enc_size,
             latent_dim,
             X,
+
+            train_classifier=None,
+            use_attention = None,
+            use_conv = None,
+
             X_classifier=None,
             Y_classifier=None,
             attn_config=None,
             mode_config=None,
-            train_classifier=None,
             test_split=0,
             run=None
             ):
@@ -58,23 +66,25 @@ class DRAW:
         # set batch size as placeholder to be fed with each run
 
         self.X = X 
-        
-        test_split = test_split if test_split != 0 else 0.33
-        self.X_c, self.X_c_test, self.Y_c, self.Y_c_test = train_test_split(
-                                                X_classifier,
-                                                Y_classifier,
-                                                test_size=test_split,
-                                                random_state=42
-                                            )
+        self.eps = 1e-8
         
         self.train_classifier=train_classifier
-        self.eps = 1e-8
+
+        if self.train_classifier:
+            test_split = test_split if test_split != 0 else 0.25
+            self.X_c, self.X_c_test, self.Y_c, self.Y_c_test = train_test_split(
+                                                    X_classifier,
+                                                    Y_classifier,
+                                                    test_size=test_split,
+                                                )
 
         self.data_shape = self.X.shape
 
+        self.use_attention = use_attention
+        self.use_conv = use_conv
+
         self.restore_mode = False
-        self.simulated_mode = True
-        self.use_attention = True
+        self.simulated_mode = False
 
         if len(self.data_shape) == 3 or len(self.data_shape) == 4:
             self.n_input = self.data_shape[1] * self.data_shape[2]
@@ -140,28 +150,46 @@ class DRAW:
 
     def _ModelGraph(
             self,
-            initializer=tf.initializers.glorot_normal
+            initializer=tf.initializers.glorot_normal,
+            n_encoder_cells=2,
+            n_decoder_cells=2,
             ):
 
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
 
-        self.encoder = tf.nn.rnn_cell.LSTMCell(
-            self.enc_size,
-            state_is_tuple=True,
-            activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-            initializer=initializer, 
-        )
+        encoder_cells = []
+        decoder_cells = []
 
-        self.decoder = tf.nn.rnn_cell.LSTMCell(
-            self.dec_size,
-            state_is_tuple=True,
-            activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-            initializer=initializer, 
-        )
+        for i in range(n_encoder_cells):
+            encoder_cells.append(
+                            tf.nn.rnn_cell.LSTMCell(
+                                        self.enc_size,
+                                        state_is_tuple=True,
+                                        activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                                        initializer=initializer, 
+                                    )
+                            )
 
-        self.read = self.read_a if self.use_attention else self.readNoAttn
-        self.write = self.write_a if self.use_attention else self.writeNoAttn
+        for i in range(n_decoder_cells):
+            decoder_cells.append(
+                            tf.nn.rnn_cell.LSTMCell(
+                                        self.dec_size,
+                                        state_is_tuple=True,
+                                        activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                                        initializer=initializer, 
+                                    )
+                            )
+
+        self.encoder = tf.nn.rnn_cell.MultiRNNCell(encoder_cells)
+        self.decoder = tf.nn.rnn_cell.MultiRNNCell(decoder_cells)
+
+        self.read = self.read_a if self.use_attention else self.read_no_attn
+        self.write = self.write_a if self.use_attention else self.write_no_attn
+
+        if self.use_conv:
+            self.read = self.read_conv
+            self.write = self.write_conv
 
         self.canvas_seq = [0]*self.T
         self.z_seq = [0]*self.T
@@ -173,9 +201,9 @@ class DRAW:
         h_dec_prev = tf.zeros((self.batch_size, self.dec_size))
         c_prev = tf.zeros((self.batch_size, self.n_input))
 
-        enc_state = self.encoder.zero_state(self.batch_size, tf.float32)
         dec_state = self.decoder.zero_state(self.batch_size, tf.float32)
-
+        enc_state = self.encoder.zero_state(self.batch_size, tf.float32)
+    
         # Unrolling the computational graph for the LSTM
         for t in range(self.T):
             # computing the error image
@@ -183,19 +211,22 @@ class DRAW:
                 x_hat = c_prev
             else:
                 x_hat = self.x - tf.sigmoid(c_prev)
-
+            
+            """ Encoder operations  """
             r = self.read(self.x, x_hat, h_dec_prev)
-
             h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
             z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
-            h_dec, dec_state = self.decode(dec_state, z)
 
+            """ Decoder operations """
+            h_dec, dec_state = self.decode(dec_state, z)
             self.canvas_seq[t] = c_prev + self.write(h_dec)
+
+            """ Storing and updating values """
             self.z_seq[t] = z
             self.dec_state_seq[t] = dec_state
-            
             h_dec_prev = h_dec
             c_prev = self.canvas_seq[t]
+
             self.DO_SHARE = True
 
         if self.train_classifier: 
@@ -413,6 +444,8 @@ class DRAW:
             print("cannot train before model is compiled and gradients are computed")
             return
 
+        K.set_session(sess)
+
         self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
 
@@ -586,9 +619,6 @@ class DRAW:
         return tf.matmul(x, w) + b
 
 
-    def readNoAttn(self, x, x_hat, h_dec_prev):
-        return tf.concat([x, x_hat], 1)
-
 
     def sample(self, h_enc):
         """
@@ -617,16 +647,125 @@ class DRAW:
         return (mu + sigma, mu, logsigma, sigma)
 
 
-    def writeNoAttn(self, h_dec):
+    def read_no_attn(self, x, x_hat, h_dec_prev):
+        return tf.concat([x, x_hat], 1)
+
+
+    def write_no_attn(self, h_dec):
         with tf.variable_scope("write", reuse=self.DO_SHARE):
             return self.linear(h_dec, self.n_inputs)
+
+
+    def read_conv(self, x, x_hat, h_dec_prev):
+        
+        conv_architecture = {
+                "n_layers": 3,
+                "filters": [40, 40, 80, ],
+                "kernel_size": [5, 3, 4,],
+                "strides": [3, 2, 1, ],
+                "pool": [0, 1, 0,] ,
+                }
+        
+        with tf.variable_scope("read", reuse=self.DO_SHARE):
+            x = tf.reshape(x, (-1, self.H, self.W, 1))
+            x_hat = tf.reshape(x_hat, (-1, self.H, self.W, 1))
+
+            out = tf.concat((x, x_hat), axis=3)
+
+            for i in range(conv_architecture["n_layers"]):
+
+                filters = conv_architecture["filters"][i]
+                kernel_size = conv_architecture["kernel_size"][i]
+                strides = conv_architecture["strides"][i]
+                pool = conv_architecture["pool"][i]
+
+                out = tf.keras.layers.Conv2D(
+                        filters=filters,
+                        kernel_size=kernel_size,
+                        strides=strides,
+                        padding="valid",
+                        use_bias=True,
+                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        )(out)
+
+                if pool:
+                    out = tf.keras.layers.MaxPool2D(2)(out)
+
+                out = tf.nn.relu(out)
+            
+            out_shape = out.get_shape()
+            flat_shape = out_shape[1]*out_shape[2]*out_shape[3]
+
+            out = tf.reshape(out, (-1, flat_shape))
+            
+            return out
+
+
+    def write_conv(self, h_dec):
+        if h_dec.get_shape()[1] > (self.H*self.W):
+            raise ValueError("decoder size is not implemented to handle larger \
+                    sizes than H*W")
+
+
+        sqrt_h_dec_size = np.sqrt(self.dec_size).astype(np.int32)
+
+        deconv_architecture = {
+                "n_layers": 3,
+                "strides": [2, 1, 1],
+                "kernel_size": [2, 3, 3],
+                "filters": [80, 30, 1],
+                "resize": [0, 1 ,1],
+                "re_size": [0, sqrt_h_dec_size+10, 0]
+               }
+
+        out = tf.reshape(h_dec, (-1, sqrt_h_dec_size, sqrt_h_dec_size, 1)) 
+
+        with tf.variable_scope("read", reuse=self.DO_SHARE):
+            for i in range(deconv_architecture["n_layers"]):
+
+                if deconv_architecture["resize"][i]:
+                    
+                    if i == (deconv_architecture["n_layers"] - 1):
+                        size = (self.H, self.W)
+                    else:
+                        tmp = deconv_architecture["re_size"][i]
+                        size = (tmp, tmp)
+
+                    out = tf.image.resize_images(
+                                            out,
+                                            size=size,
+                                            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR
+                                            )
+
+                filters = deconv_architecture["filters"][i]
+                kernel_size = deconv_architecture["kernel_size"][i]
+                strides = deconv_architecture["strides"][i]
+
+                out = tf.keras.layers.Conv2D(
+                        filters=filters,
+                        kernel_size=kernel_size,
+                        strides=strides,
+                        padding="same",
+                        use_bias=True,
+                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        )(out)
+
+                out = tf.nn.relu(out)
+    
+        print("DID I DO THE DECONV RIGHT?!?")
+        print(out.get_shape())
+        out = tf.reshape(out, (-1, self.n_input))
+        return out
+        
 
 
     def attn_params(self, scope, h_dec, N):
         with tf.variable_scope(scope, reuse=self.DO_SHARE):
             tmp = self.linear(h_dec, 4, regularizer=tf.contrib.layers.l1_regularizer)
             gx, gy, logsigma_sq, loggamma = tf.split(tmp, 4, 1)
-
+            
         sigma_sq = tf.exp(logsigma_sq)
 
         if scope == "write":
@@ -728,8 +867,7 @@ class DRAW:
         decoder_states = []
 
         for j, X in enumerate(X_tup):
-
-            n_latent = (X.shape[0]//self.batch_size)*self.batch_size
+            n_latent = X.shape[0]
             latent_values = np.zeros((self.T, n_latent, self.latent_dim))
             dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
@@ -839,7 +977,7 @@ if __name__ == "__main__":
 
     T = 9
     enc_size = 10
-    dec_size = 11
+    dec_size = 16
     latent_dim = 8
 
     batch_size = 12
@@ -849,31 +987,22 @@ if __name__ == "__main__":
     delta_write = 10
     delta_read = 10 
     
-    array_delta_w = np.zeros((batch_size, 1))
-    array_delta_w.fill(delta_write)
-    array_delta_w = array_delta_w.astype(np.float32)
-
-    array_delta_r = np.zeros((batch_size, 1))
-    array_delta_r.fill(delta_read)
-    array_delta_r = array_delta_r.astype(np.float32)
-
     attn_config = {
                 "read_N": 10,
                 "write_N": 10,
                 "write_N_sq": 10**2,
-                "delta_w": array_delta_w,
-                "delta_r": array_delta_r,
-            }
-
+                "delta_w": delta_write,
+                "delta_r": delta_read,
+        
+                }
 
     draw_model = DRAW(
             T,
             dec_size,
             enc_size,
             latent_dim,
-            batch_size,
             train_data,
-            attn_config
+            use_conv=True
             )
     
     graph_kwds = {
