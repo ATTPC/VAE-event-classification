@@ -1,11 +1,11 @@
 import numpy as np 
 import tensorflow as tf
 
-from keras.layers import Flatten, Dense, Input
+from keras.layers import Flatten, Dense, Input, ZeroPadding2D
 from keras.losses import categorical_crossentropy
 from keras.models import Model
 
-from keras.layers import Conv2D, Conv2DTranspose, Flatten, MaxPool2D
+from keras.layers import Conv2D, Conv2DTranspose, MaxPool2D
 
 from keras import backend as K
 
@@ -40,8 +40,9 @@ class DRAW:
             enc_size,
             latent_dim,
             X,
+            beta=1,
 
-            train_classifier=None,
+            train_classifier=False,
             use_attention = None,
             use_conv = None,
 
@@ -62,6 +63,7 @@ class DRAW:
         self.dec_size = dec_size 
         self.enc_size = enc_size
         self.latent_dim = latent_dim
+        self.beta = beta
         
         # set batch size as placeholder to be fed with each run
 
@@ -215,7 +217,12 @@ class DRAW:
             """ Encoder operations  """
             r = self.read(self.x, x_hat, h_dec_prev)
             h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
-            z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
+
+            if self.include_KL:
+                z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
+            else:
+                with tf.variable_scope("sample", reuse=self.DO_SHARE):
+                    z = self.linear(h_enc, self.latent_dim)
 
             """ Decoder operations """
             h_dec, dec_state = self.decode(dec_state, z)
@@ -226,6 +233,31 @@ class DRAW:
             self.dec_state_seq[t] = dec_state
             h_dec_prev = h_dec
             c_prev = self.canvas_seq[t]
+
+            if t == -1:
+                print("------------ TRAINABLE PARAMS -------------")
+                total_params = 0
+
+                for variable in tf.global_variables():
+                    i = 1
+                    shape = variable.get_shape()
+
+                    for s in shape.as_list():
+                        if s is None:
+                            continue
+                        else:
+                            i *= s
+
+                    total_params += i
+
+                    print("name: ", variable.name)
+                    print("shape: ", shape)
+                    print("number of params: ", i)
+                    print(" ######## ")
+
+                print("------- TOTAL TRAINABLE PARAMS --------- ")
+                print(total_params)
+                print("----------------------------------------")
 
             self.DO_SHARE = True
 
@@ -261,7 +293,7 @@ class DRAW:
 
 
 
-    def _ModelLoss(self, reconst_loss=None, include_KL=True):
+    def _ModelLoss(self, reconst_loss=None, scale_kl=False):
 
         """
         Parameters
@@ -283,22 +315,43 @@ class DRAW:
         self.Lx = tf.reduce_mean(tf.reduce_sum(reconst_loss(self.x, x_recons), 1))
         #Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
         #Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
+        self.scale_kl = scale_kl
 
-        KL_loss = [0]*self.T
+        if self.include_KL:
 
-        for t in range(self.T):
-            mu_sq = tf.square(self.mus[t])
-            sigma_sq = tf.square(self.sigmas[t])
-            logsigma_sq = tf.square(self.logsigmas[t])
+            KL_loss = [0]*self.T
 
-            KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
+            for t in range(self.T):
+                mu_sq = tf.square(self.mus[t])
+                sigma_sq = tf.square(self.sigmas[t])
+                logsigma_sq = tf.square(self.logsigmas[t])
+                KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
 
-        KL = 0.5 * tf.add_n(KL_loss) - self.T/2
-        self.Lz = tf.reduce_mean(KL)
+            KL = self.beta * 0.5 * tf.add_n(KL_loss) - self.T/2
 
-        cost = self.Lx + self.Lz if include_KL else self.Lx
-        #reg_var = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-        #reg_var = tf.sum(reg_var)
+            if scale_kl:
+                self.kl_scale = tf.placeholder(dtype=tf.float32, shape=(1,))
+
+                self.Lz = tf.reduce_mean(KL)
+                self.Lz *= self.kl_scale
+            else:
+                self.Lz = tf.reduce_mean(KL)
+
+        elif self.include_MMD:
+            MMD_loss = [0]*self.T
+
+            for t in range(self.T):
+                z = self.z_seq[t]
+                ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+                mmd = self.compute_mmd(ref, z)
+                MMD_loss[t] = mmd
+
+            self.Lz = self.H*tf.reduce_mean(MMD_loss) - self.T/2
+
+        else:
+            self.Lz = tf.constant(0, dtype=tf.float32)*self.Lx
+
+        cost = self.Lz + self.Lx
         cost += tf.losses.get_regularization_loss()
         self.cost = cost
 
@@ -315,6 +368,27 @@ class DRAW:
     def binary_crossentropy(self, t, o):
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
+    def compute_kernel(self, x, y):
+        """
+        Copied from Shengjia Zhao:
+        http://szhao.me/2017/06/10/a-tutorial-on-mmd-variational-autoencoders.html
+        """
+        x_size = tf.shape(x)[0]
+        y_size = tf.shape(y)[0]
+        dim = tf.shape(x)[1]
+        tiled_x = tf.tile(tf.reshape(x, tf.stack([x_size, 1, dim])), tf.stack([1, y_size, 1]))
+        tiled_y = tf.tile(tf.reshape(y, tf.stack([1, y_size, dim])), tf.stack([x_size, 1, 1]))
+        return tf.exp(-tf.reduce_mean(tf.square(tiled_x - tiled_y), axis=2) / tf.cast(dim, tf.float32))
+
+    def compute_mmd(self, x, y, sigma_sqr=1.0):
+        """
+        Copied from Shengjia Zhao:
+        http://szhao.me/2017/06/10/a-tutorial-on-mmd-variational-autoencoders.html
+        """
+        x_kernel = self.compute_kernel(x, x)
+        y_kernel = self.compute_kernel(y, y)
+        xy_kernel = self.compute_kernel(x, y)
+        return tf.reduce_mean(x_kernel) + tf.reduce_mean(y_kernel) - 2 * tf.reduce_mean(xy_kernel)
 
     def computeGradients(
             self,
@@ -451,6 +525,7 @@ class DRAW:
 
         #set session as self attribute to be available from sigint call
         self.sess = sess
+        run_opts = tf.RunOptions(report_tensor_allocations_upon_oom=True)
 
         train_iters = self.data_shape[0] // minibatch_size
         n_mvavg = 5
@@ -488,6 +563,9 @@ class DRAW:
                 batch = batch.reshape(np.size(ind), self.n_input)
 
                 feed_dict = {self.x: batch, }#self.batch_size: minibatch_size}
+                if self.scale_kl:
+                    feed_dict[self.kl_scale] = np.array([i/epochs, ])
+
                 results = sess.run(self.fetches, feed_dict)
                 Lx, Lz, _, _, _, = results
 
@@ -496,6 +574,7 @@ class DRAW:
 
                 if self.train_classifier:
                     if  (j % train_interval) == 0:
+
                         batch_ind = next(clf_bm_inst)
                         #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
                         clf_batch = self.X_c[batch_ind]
@@ -504,10 +583,14 @@ class DRAW:
                         t_batch = self.Y_c[batch_ind]
 
                         clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch,}# self.batch_size: minibatch_size}
-                        clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict)
+                        clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict, options=run_opts)
                         logloss_train.append(clf_cost)
 
-            all_lz[i] = tf.reduce_mean(Lzs).eval()
+            if self.scale_kl:
+                all_lz[i] = np.average(Lzs)
+            else:
+                all_lz[i] = np.average(Lzs)
+
             all_lx[i] = tf.reduce_mean(Lxs).eval()
 
             """Compute classifier performance """
@@ -522,14 +605,26 @@ class DRAW:
 
                 for k, tup in enumerate([train_tup, test_tup]):
 
+                    score = 0
+                    clf_batch = 100
                     X, Y = tup
-                    n_to_pred = X.shape[0]
+                    tot = X.shape[0]
+                    clf_bm = BatchManager(tot, clf_batch)
 
-                    to_pred = X.reshape((n_to_pred, self.n_input))
-                    targets = Y
+                    for bi in clf_bm:
+                        n_bi = bi.shape[0]
+                        to_pred = X[bi].reshape((n_bi, self.n_input))
+                        targets = Y[bi]
 
-                    scores[k] = self.score(sess, to_pred, targets, metric=f1_score, metric_kwds={"average": None})
+                        tmp = np.array(self.score(
+                            sess,
+                            to_pred,
+                            targets,
+                            metric=f1_score,
+                            metric_kwds={"average": None, "labels":[0, 1, 2]}))
+                        score += (n_bi/tot) * tmp
 
+                    scores[k] = score
 
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
                         train score {}  | test score {}".format(
@@ -603,7 +698,7 @@ class DRAW:
             x, 
             output_dim,
             regularizer=tf.contrib.layers.l2_regularizer,
-            lmbd=0.1
+            lmbd=0.1,
             ):
 
         w = tf.get_variable("w", [x.get_shape()[1], output_dim],
@@ -640,8 +735,9 @@ class DRAW:
             sigma = self.linear(h_enc, self.latent_dim,
                         lmbd=0.1,
                         regularizer=tf.contrib.layers.l2_regularizer)
+            sigma = tf.nn.relu(sigma)
 
-            sigma = tf.clip_by_value(sigma, 1, 10)
+            sigma = tf.clip_by_value(sigma, 1, 100)
             logsigma = tf.log(sigma)
 
         return (mu + sigma, mu, logsigma, sigma)
@@ -653,22 +749,26 @@ class DRAW:
 
     def write_no_attn(self, h_dec):
         with tf.variable_scope("write", reuse=self.DO_SHARE):
-            return self.linear(h_dec, self.n_inputs)
+            return self.linear(h_dec, self.n_input)
 
 
     def read_conv(self, x, x_hat, h_dec_prev):
-        
         conv_architecture = {
-                "n_layers": 3,
-                "filters": [40, 40, 80, ],
-                "kernel_size": [5, 3, 4,],
-                "strides": [3, 2, 1, ],
-                "pool": [0, 1, 0,] ,
+                "n_layers": 4,
+                "filters": [40, 256, 128, 5],
+                "kernel_size": [2, 3, 2, 2],
+                "strides": [2, 2, 1, 1],
+                "pool": [1, 0, 1, 0] ,
+                "activation": [0, 1, 0, 1],
                 }
-        
+
         with tf.variable_scope("read", reuse=self.DO_SHARE):
-            x = tf.reshape(x, (-1, self.H, self.W, 1))
-            x_hat = tf.reshape(x_hat, (-1, self.H, self.W, 1))
+
+            gamma = self.linear(h_dec_prev, 1)
+            x = gamma*x
+
+            x = tf.reshape(x, (tf.shape(x)[0], self.H, self.W, 1))
+            x_hat = tf.reshape(x_hat, (tf.shape(x)[0], self.H, self.W, 1))
 
             out = tf.concat((x, x_hat), axis=3)
 
@@ -692,13 +792,19 @@ class DRAW:
                 if pool:
                     out = tf.keras.layers.MaxPool2D(2)(out)
 
-                out = tf.nn.relu(out)
-            
+                if not self.DO_SHARE:
+                    print("conv shape: ", out.get_shape())
+
+                if conv_architecture["activation"][i]:
+                    out = tf.nn.relu(out)
+
             out_shape = out.get_shape()
             flat_shape = out_shape[1]*out_shape[2]*out_shape[3]
 
-            out = tf.reshape(out, (-1, flat_shape))
-            
+            if not self.DO_SHARE:
+                print("Final shape: ", flat_shape)
+
+            out = tf.reshape(out, (tf.shape(x)[0], flat_shape))
             return out
 
 
@@ -707,65 +813,103 @@ class DRAW:
             raise ValueError("decoder size is not implemented to handle larger \
                     sizes than H*W")
 
-
-        sqrt_h_dec_size = np.sqrt(self.dec_size).astype(np.int32)
-
+        out_size = 0
         deconv_architecture = {
-                "n_layers": 3,
-                "strides": [2, 1, 1],
-                "kernel_size": [2, 3, 3],
-                "filters": [80, 30, 1],
-                "resize": [0, 1 ,1],
-                "re_size": [0, sqrt_h_dec_size+10, 0]
+                "n_layers": 4,
+                "strides": [2, 2, 2, 2, ],
+                "kernel_size": [2, 2, 2, 2,  ],
+                "filters": [50, 128, 68, 5, ],
+                "activation": [1, 0, 1, 0],
+                "input_dim": 4,
+                "input_filters": 256,
                }
 
-        out = tf.reshape(h_dec, (-1, sqrt_h_dec_size, sqrt_h_dec_size, 1)) 
+        with tf.variable_scope("write", reuse=self.DO_SHARE):
 
-        with tf.variable_scope("read", reuse=self.DO_SHARE):
+            idim = deconv_architecture["input_dim"]
+            ifilters = deconv_architecture["input_filters"]
+
+            out = self.linear(h_dec, idim*idim*ifilters)
+            out = tf.reshape(
+                    out, 
+                    (tf.shape(h_dec)[0], idim, idim, ifilters)
+                    )
+
+            input_size = idim
+
             for i in range(deconv_architecture["n_layers"]):
-
-                if deconv_architecture["resize"][i]:
-                    
-                    if i == (deconv_architecture["n_layers"] - 1):
-                        size = (self.H, self.W)
-                    else:
-                        tmp = deconv_architecture["re_size"][i]
-                        size = (tmp, tmp)
-
-                    out = tf.image.resize_images(
-                                            out,
-                                            size=size,
-                                            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR
-                                            )
-
+                """
+                pad = deconv_architecture["padding"][i]
+                if pad != 0:
+                    out = tf.keras.layers.ZeroPadding2D((pad, pad))(out)
+                """
                 filters = deconv_architecture["filters"][i]
                 kernel_size = deconv_architecture["kernel_size"][i]
                 strides = deconv_architecture["strides"][i]
 
-                out = tf.keras.layers.Conv2D(
+                out_size = strides*(input_size - 1) + kernel_size 
+                input_size = out_size
+
+                out = tf.keras.layers.Conv2DTranspose(
                         filters=filters,
-                        kernel_size=kernel_size,
+                        kernel_size=(kernel_size, )*2,
                         strides=strides,
-                        padding="same",
+                        padding="valid",
                         use_bias=True,
                         kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
                         bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
                         )(out)
 
-                out = tf.nn.relu(out)
-    
-        print("DID I DO THE DECONV RIGHT?!?")
-        print(out.get_shape())
-        out = tf.reshape(out, (-1, self.n_input))
+                if not self.DO_SHARE:
+                    print("Deconv shape: ", out.get_shape())
+
+                if deconv_architecture["activation"][i]:
+                    out = tf.nn.relu(out)
+
+            s = 2
+            k = self.H - s*(input_size - 1) 
+
+            if not self.DO_SHARE:
+                print("Last kernel: ", k)
+
+            #out = tf.keras.layers.ZeroPadding2D((p, p))(out)
+
+            if k <= 0: 
+                k = input_size + s - self.H*s
+
+                if not self.DO_SHARE:
+                    print("Last kernel: ", k)
+
+                out = tf.keras.layers.Conv2D(
+                        filters=1,
+                        kernel_size=(k, )*2,
+                        strides=s,
+                        padding="valid",
+                        use_bias=True,
+                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        )(out)
+
+            else:
+                out = tf.keras.layers.Conv2DTranspose(
+                        filters=1,
+                        kernel_size=(k, )*2,
+                        strides=s,
+                        padding="valid",
+                        use_bias=True,
+                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        )(out)
+
+        out = tf.reshape(out, (tf.shape(h_dec)[0], self.n_input))
         return out
-        
 
 
     def attn_params(self, scope, h_dec, N):
         with tf.variable_scope(scope, reuse=self.DO_SHARE):
             tmp = self.linear(h_dec, 4, regularizer=tf.contrib.layers.l1_regularizer)
             gx, gy, logsigma_sq, loggamma = tf.split(tmp, 4, 1)
-            
+
         sigma_sq = tf.exp(logsigma_sq)
 
         if scope == "write":
@@ -871,18 +1015,21 @@ class DRAW:
             latent_values = np.zeros((self.T, n_latent, self.latent_dim))
             dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
+            latent_bm = BatchManager(n_latent, 100)
 
-            to_feed = X.reshape((X.shape[0], self.H*self.W))
-            feed_dict = {self.x: to_feed, self.batch_size: X.shape[0]}
+            for ind in latent_bm:
 
-            _, _, z_seq, dec_state_seq, _, = sess.run(self.fetches, feed_dict)
+                to_feed = X[ind].reshape((np.size(ind), self.H*self.W))
+                feed_dict = {self.x: to_feed, self.batch_size: to_feed.shape[0]}
+                to_run = [self.z_seq, self.dec_state_seq, self.canvas_seq]
 
-            canvasses = sess.run(self.canvas_seq, feed_dict)
+                z_seq, dec_state_seq, canvasses = sess.run(to_run, feed_dict)
 
-            latent_values = z_seq
-            reconstructions = np.array(canvasses)
-            dec_state_array = dec_state_seq
-            
+                latent_values[:, ind, :] = z_seq
+                reconstructions[:, ind, :] = canvasses
+                dec_state_seq = np.squeeze(np.array(dec_state_seq))
+                dec_state_array[:, :, ind, :] = dec_state_seq
+
             lat_vals.append(latent_values)
             recons_vals.append(reconstructions)
             decoder_states.append(dec_state_array)
