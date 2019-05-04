@@ -10,6 +10,7 @@ import os
 from sklearn.model_selection import  cross_val_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import f1_score
 
 from keras.utils import to_categorical
 
@@ -21,6 +22,8 @@ from draw import DRAW
 matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 def longform_latent(latent,):
     longform_samples = np.zeros((
@@ -36,43 +39,37 @@ def longform_latent(latent,):
     return longform_samples
 
 
-def compute_accuracy(X, y):
+def compute_accuracy(X, y, Xtest, ytest):
 
-   #model = LogisticRegression(
-   #         solver="liblinear",
-   #         multi_class="ovr",
-   #         class_weight="balanced"
-   #     )
-
-    mlp = MLPClassifier(
+    model = LogisticRegression(
+            penalty="l2",
+            solver="newton-cg",
+            multi_class="multinomial",
+            class_weight="balanced",
             max_iter=1000,
-            batch_size=10,
-            hidden_layer_sizes=(80, 30, 10),
-            early_stopping=True,
-            learning_rate_init=0.01
         )
 
-    mlp.fit(X, y)
-    #model.fit(X, y)
+    model.fit(X, y)
 
-    #logreg_score = np.average(cross_val_score(model, X, y, cv=4))
-    mlp_score = np.average(cross_val_score(mlp, X, y, cv=4))
+    train_score = f1_score(y, model.predict(X), average=None)
+    test_score = f1_score(ytest, model.predict(Xtest), average=None)
 
-    return mlp_score
+    return train_score, test_score 
 
-T = 7
-enc_size = 1500
-dec_size = 1000
-latent_dim = 6
-epochs = 100
+T = 3
+enc_size = 800
+dec_size = 100
+latent_dim = 3
+epochs = 40
 
 treshold_value = 0.4
 treshold_data = False
 
-batch_size = 86
+batch_size = 80
 
 with h5py.File("../data/images.h5", "r") as fo:
     train_targets = np.array(fo["train_targets"])
+    test_targets = np.array(fo["test_targets"])
 
 all_0130 = np.load("../data/processed/all_0130.npy")
 #all_0210 = np.load("../data/processed/all_0210.npy")
@@ -101,26 +98,23 @@ delta_read = delta
 read_N = N
 write_N = N
 
-array_delta_w = np.zeros((batch_size, 1))
-array_delta_w.fill(delta_write)
-array_delta_w = array_delta_w.astype(np.float32)
-
-array_delta_r = np.zeros((batch_size, 1))
-array_delta_r.fill(delta_read)
-array_delta_r = array_delta_r.astype(np.float32)
-
 attn_config = {
     "read_N": read_N,
     "write_N": write_N,
     "write_N_sq": write_N**2,
-    "delta_w": array_delta_w,
-    "delta_r": array_delta_r,
+    "delta_w": delta,
+    "delta_r": delta,
 }
 
-mode_config = {"simulated_mode": False}
+mode_config = {
+        "simulated_mode": False,
+        "restore_mode": False,
+        "include_KL": False,
+        "include_MMD": True,
+        }
 
 with tf.device("/gpu:2"):
-    train_targets = to_categorical(train_targets)
+    model_train_targets = to_categorical(train_targets)
 
     draw_model = DRAW(
         T,
@@ -128,26 +122,31 @@ with tf.device("/gpu:2"):
         enc_size,
         latent_dim,
         all_data,
-        X_classifier=train_data,
-        Y_classifier=train_targets,
-        attn_config=attn_config,
+        beta=3,
+        train_classifier=False,
+        use_conv=False,
+        use_attention=True,
+        #X_classifier=train_data,
+        #Y_classifier=model_train_targets,
         mode_config=mode_config,
-        train_classifier=True
+        attn_config=attn_config,
     )
 
     graph_kwds = {
-        "initializer": tf.initializers.glorot_normal
+        "initializer": tf.initializers.glorot_normal,
+        "n_encoder_cells": 1,
+        "n_decoder_cells": 1 
     }
 
     loss_kwds = {
         "reconst_loss": None,
-        "include_KL": True
+        "scale_kl": False,
     }
 
     draw_model.CompileModel(graph_kwds, loss_kwds)
 
     opt = tf.train.AdamOptimizer
-    opt_args = [1e-2, ]
+    opt_args = [1e-3, ]
     opt_kwds = {
         "beta1": 0.5,
     }
@@ -155,28 +154,43 @@ with tf.device("/gpu:2"):
     draw_model.computeGradients(opt, opt_args, opt_kwds)
 
     sess = tf.InteractiveSession()
-
+    
     data_dir = "../drawing"
     model_dir = "../models"
 
     lx, lz, = draw_model.train(
-        sess, epochs, data_dir, model_dir, batch_size, earlystopping=False)
+                            sess,
+                            epochs,
+                            data_dir,
+                            model_dir,
+                            batch_size,
+                            earlystopping=False)
 
     draw_model.X = train_data
-    draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
+    draw_model.generate_latent(sess, "../drawing", (train_data, test_data))
 
-    latent_values , _, _ = draw_model.generateLatent(sess, "../drawing", (train_data, ), save=False)
-    latent_values = longform_latent(latent_values[0])
+    latent_values , _, _ = draw_model.generate_latent(
+                                        sess,
+                                        "../drawing",
+                                        (train_data, test_data ),
+                                        save=False
+                                        )
 
-    #accuracies = compute_accuracy(latent_values, train_targets[:-1])
+    latent_train = longform_latent(latent_values[0])
+    latent_test = longform_latent(latent_values[1])
 
-    #print()
+    train_score, test_score = compute_accuracy(
+            latent_train, train_targets,
+            latent_test, test_targets)
 
-    #print("--------------------")
-    #print(accuracies)
-    #print("---------------------")
+    print()
 
-    draw_model.generateSamples("../drawing", "../drawing")
+    print("--------------------")
+    print("train: ", train_score)
+    print("test : ", test_score)
+    print("---------------------")
+
+    #draw_model.generate_samples("../drawing", )
 
     sess.close()
 
