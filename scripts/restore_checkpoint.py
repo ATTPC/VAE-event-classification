@@ -5,19 +5,19 @@ import tensorflow as tf
 import numpy as np
 from draw import DRAW
 
-restore_fn = "../models/draw_attn_epoch89.ckpt"
+restore_fn = "../models/draw_no_attn_epoch29.ckpt"
 
-T = 7
-enc_size = 900
-dec_size = 900
-latent_dim = 3
+T = 3
+enc_size = 100
+dec_size = 100
+latent_dim =  20
 epochs = 100
 
 
 treshold_value = 0.4
-treshold_data = True
+treshold_data = False
 
-batch_size = 50
+batch_size = 70
 
 train_data = np.load("../data/processed/train.npy")
 test_data = np.load("../data/processed/test.npy")
@@ -26,7 +26,7 @@ train_test = np.concatenate((train_data, test_data))
 
 if treshold_data:
 	train_test[train_test < treshold_value] = 0
-delta = 1.04
+delta = 0.98
 N = 65
 
 delta_write = delta
@@ -62,14 +62,16 @@ with tf.device("/gpu:2"):
         dec_size,
         enc_size,
         latent_dim,
-        batch_size,
         train_test,
-        attn_config=attn_config,
+        use_conv=True,
+        #attn_config=attn_config,
         mode_config=mode_config,
     )
 
     graph_kwds = {
-        "initializer": tf.initializers.glorot_normal
+        "initializer": tf.initializers.glorot_normal,
+        "n_encoder_cells": 1,
+        "n_decoder_cells": 1,
     }
 
     loss_kwds = {
@@ -93,7 +95,13 @@ with tf.device("/gpu:2"):
     model_dir = "../models"
 
     lx, lz, = draw_model.train(
-    sess, epochs, data_dir, model_dir, earlystopping=False, checkpoint_fn=restore_fn)
+                            sess,
+                            epochs,
+                            data_dir,
+                            model_dir,
+                            batch_size,
+                            earlystopping=False,
+                            checkpoint_fn=restore_fn)
 
     draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
     draw_model.generateSamples("../drawing", "../drawing")
