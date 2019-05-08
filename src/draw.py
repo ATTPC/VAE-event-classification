@@ -359,7 +359,7 @@ class DRAW:
                 mmd = self.compute_mmd(ref, z)
                 self.Lz += mmd
 
-            self.Lz = self.W*self.H*self.Lz - self.T/2
+            self.Lz = self.beta*self.Lz - self.T/2
 
         else:
             self.Lz = tf.constant(0, dtype=tf.float32)*self.Lx
