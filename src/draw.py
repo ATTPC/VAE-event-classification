@@ -162,6 +162,8 @@ class DRAW:
 
         encoder_cells = []
         decoder_cells = []
+        self.n_decoder_cells = n_decoder_cells
+        self.n_encoder_cells = n_encoder_cells
 
         for i in range(n_encoder_cells):
             encoder_cells.append(
@@ -331,22 +333,33 @@ class DRAW:
 
             if scale_kl:
                 self.kl_scale = tf.placeholder(dtype=tf.float32, shape=(1,))
-
                 self.Lz = tf.reduce_mean(KL)
                 self.Lz *= self.kl_scale
             else:
                 self.Lz = tf.reduce_mean(KL)
 
         elif self.include_MMD:
-            MMD_loss = [0]*self.T
+
+            beta = tf.distributions.Beta(0.4, 0.5)
+            norm1 = tf.distributions.Normal(0., 1.)
+            norm2 = tf.distributions.Normal(6., 1.)
+            binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
+            self.Lz = 0
 
             for t in range(self.T):
                 z = self.z_seq[t]
-                ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
-                mmd = self.compute_mmd(ref, z)
-                MMD_loss[t] = mmd
+                n = self.batch_size
 
-            self.Lz = self.H*tf.reduce_mean(MMD_loss) - self.T/2
+                y1 = norm1.sample((n, self.latent_dim))
+                y2 = norm2.sample((n, self.latent_dim))
+                w = binom.sample((n, self.latent_dim))[:, :, 0]
+                ref = w*y1 + (1 - w)*y2
+
+                #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+                mmd = self.compute_mmd(ref, z)
+                self.Lz += mmd
+
+            self.Lz = self.W*self.H*self.Lz - self.T/2
 
         else:
             self.Lz = tf.constant(0, dtype=tf.float32)*self.Lx
@@ -818,10 +831,10 @@ class DRAW:
                 "n_layers": 4,
                 "strides": [2, 2, 2, 2, ],
                 "kernel_size": [2, 2, 2, 2,  ],
-                "filters": [50, 128, 68, 5, ],
+                "filters": [50, 64, 32, 5, ],
                 "activation": [1, 0, 1, 0],
                 "input_dim": 4,
-                "input_filters": 256,
+                "input_filters": 128,
                }
 
         with tf.variable_scope("write", reuse=self.DO_SHARE):
@@ -1013,9 +1026,12 @@ class DRAW:
         for j, X in enumerate(X_tup):
             n_latent = X.shape[0]
             latent_values = np.zeros((self.T, n_latent, self.latent_dim))
-            dec_state_array = np.zeros((self.T, 2, n_latent, self.dec_size))
+            dec_state_array = np.zeros((self.T, self.n_decoder_cells, 2, n_latent, self.dec_size))
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
             latent_bm = BatchManager(n_latent, 100)
+
+            #print("T", self.T, "dec size", self.dec_size)
+            #print("full dec_seq shape", dec_state_array.shape)
 
             for ind in latent_bm:
 
@@ -1024,11 +1040,14 @@ class DRAW:
                 to_run = [self.z_seq, self.dec_state_seq, self.canvas_seq]
 
                 z_seq, dec_state_seq, canvasses = sess.run(to_run, feed_dict)
+                dec_state_seq = np.array(dec_state_seq)
+
+                #print("dec_state shape", dec_state_seq.shape)
 
                 latent_values[:, ind, :] = z_seq
                 reconstructions[:, ind, :] = canvasses
-                dec_state_seq = np.squeeze(np.array(dec_state_seq))
-                dec_state_array[:, :, ind, :] = dec_state_seq
+                dec_state_seq = dec_state_seq
+                dec_state_array[:, :, :, ind, :] = dec_state_seq
 
             lat_vals.append(latent_values)
             recons_vals.append(reconstructions)

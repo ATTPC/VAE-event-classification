@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 def longform_latent(latent,):
     longform_samples = np.zeros((
@@ -56,16 +56,16 @@ def compute_accuracy(X, y, Xtest, ytest):
 
     return train_score, test_score 
 
-T = 3
-enc_size = 800
-dec_size = 100
-latent_dim = 3
-epochs = 40
+T = 8
+enc_size = 900
+dec_size = 300
+latent_dim = 25
+epochs = 20
 
-treshold_value = 0.4
+treshold_value = 0.3
 treshold_data = False
 
-batch_size = 80
+batch_size = 150
 
 with h5py.File("../data/images.h5", "r") as fo:
     train_targets = np.array(fo["train_targets"])
@@ -122,14 +122,14 @@ with tf.device("/gpu:2"):
         enc_size,
         latent_dim,
         all_data,
-        beta=3,
+        beta=1,
         train_classifier=False,
-        use_conv=False,
-        use_attention=True,
+        use_conv=True,
+        use_attention=False,
         #X_classifier=train_data,
         #Y_classifier=model_train_targets,
         mode_config=mode_config,
-        attn_config=attn_config,
+        ##attn_config=attn_config,
     )
 
     graph_kwds = {
