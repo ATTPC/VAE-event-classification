@@ -69,11 +69,10 @@ def compute_accuracy(X, y, Xtest, ytest):
 
 delta = 0.98
 N = 65
-batch_size = 150
+batch_size = 50
 enc_size = 500 
 
 num_simulations = 100
-epochs = 20
 
 read_N = N
 write_N = N
@@ -98,7 +97,7 @@ with h5py.File("../data/images.h5", "r") as fo:
 all_data = all_0130
 
 data_ind = np.arange(all_data.shape[0])
-chosen_in = np.random.choice(data_ind, 20000, replace=False)
+chosen_in = np.random.choice(data_ind, 10000, replace=False)
 all_data = all_data[chosen_in]
 
 if treshold_data:
@@ -106,16 +105,17 @@ if treshold_data:
 
 hyperparam_vals = [
         "T, dec_state_size, latent_dim, loss_type, rw_type, \
-        n_enc, n_dec, beta", ]
+n_enc, n_dec, beta, eta, epoch", ]
 
-loss_record = np.zeros((num_simulations, 2, epochs))
+#loss_record = np.zeros((num_simulations, 2, epochs))
+loss_record = [[0, 0]]*num_simulations
 clf_record = np.zeros((num_simulations, 2, 2, 3))
 
 hp_gen = make_hyperparam()
 
 for i in range(num_simulations):
 
-    T, state_size, latent_dim, loss_type, rw_type, n_enc, n_dec, beta = hp_gen.generate_config()
+    T, state_size, latent_dim, loss_type, rw_type, n_enc, n_dec, beta, eta, epochs = hp_gen.generate_config()
     hyperparam_vals.append([T, state_size, latent_dim, loss_type, rw_type, n_enc, n_dec, beta])
 
     use_attention = False
@@ -180,7 +180,7 @@ for i in range(num_simulations):
     draw_model.CompileModel(graph_kwds, loss_kwds)
 
     opt = tf.train.AdamOptimizer
-    opt_args = [1e-3,]
+    opt_args = [eta,]
     opt_kwds = {
             "beta1": 0.5,
             }
@@ -198,7 +198,9 @@ for i in range(num_simulations):
                             data_dir,
                             model_dir,
                             batch_size,
-                            save_checkpoints=False)
+                            save_checkpoints=False,
+                            earlystopping=False
+                            )
 
     if any(np.isnan(lx)) or any(np.isnan(lz)):
             continue
@@ -221,7 +223,7 @@ for i in range(num_simulations):
 
     print("--------------------")
     print("Dec size: ", dec_size, " Latent dim : ", latent_dim, " loss : ", loss_type)
-    print("rw_type: ", rw_type, " T :", T, "beta : ", beta )
+    print("rw_type: ", rw_type, " T :", T, "beta : ", beta, " eta: ", eta, " epocs: ", epochs )
     print("####### TRAIN scores #######")
     print("logreg_score", lr_scores[0], "mlp_scores", mlp_scores[0])
     print("####### TEST scores #######")

@@ -1,20 +1,33 @@
 import numpy as np
 import cv2
-import matplotlib.pyplot as plt
 
-train_data = np.load("../data/processed/train.npy")
+base = "../data/"
+data_locations = [
+        base+"processed/train.npy",
+        base+"processed/all_0130.npy",
+        base+"processed/test.npy",
+        ]
 
-i = 1
-which = [10+i, 1+i, 3+i, 4+i, 13+i, 20+i, ]
-s = np.squeeze(train_data[which]).astype(np.float64)
-s_dim = s.shape
+perc = 0.35
 
-fig, axs = plt.subplots(nrows=len(which), ncols=2, figsize=(10, 10))
+for loc_fn in data_locations:
+    data = np.load(loc_fn)
+    s = np.squeeze(data)
 
+    w = s.shape[1]
+    h = s.shape[2]
 
-for i, row in enumerate(axs):
-    source = (255*s[i]/s[i].max()).astype(np.uint8)
-    source = cv2.resize(source, None, fx=0.35, fy=0.35)
+    to = np.zeros((s.shape[0], int(np.round(w*perc)), int(np.round(h*perc)), 1))
 
-    ds = cv2.fastNlMeansDenoising(
-        source, None, 17, 21, 7)
+    for i in range(s.shape[0]):
+        source = s[i]
+        max_val = source.max()
+        source = (255*source/max_val).astype(np.uint8)
+        source = cv2.resize(source, None, fx=perc, fy=perc)
+
+        to[i] = np.expand_dims((source * max_val / 255).astype(np.float64), -1)
+
+    to_fn = loc_fn[:3] + loc_fn[3:].replace(".", "_{}.".format(perc*100))
+    print(to_fn)
+    np.save(to_fn, to)
+
