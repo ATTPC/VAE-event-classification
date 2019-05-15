@@ -7,7 +7,7 @@ import numpy as np
 import h5py
 import os
 
-from sklearn.model_selection import  cross_val_score
+from sklearn.model_selection import  cross_val_score, train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import f1_score
@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 def longform_latent(latent,):
     longform_samples = np.zeros((
@@ -56,34 +56,42 @@ def compute_accuracy(X, y, Xtest, ytest):
 
     return train_score, test_score 
 
-T = 22
+T = 8
 enc_size = 200
 dec_size = 900
-latent_dim  = 35
-epochs = 10
+latent_dim  = 3
+epochs = 50
 
 treshold_value = 0.3
 treshold_data = False
 
 batch_size = 50
 
-with h5py.File("../data/images.h5", "r") as fo:
-    train_targets = np.array(fo["train_targets"])
-    test_targets = np.array(fo["test_targets"])
-
-all_0130 = np.load("../data/processed/all_0130.npy")
+all_0130 = np.load("../data/clean/images/run_0130_label_False.npy")
+all_0170 = np.load("../data/clean/images/run_0170_label_False.npy")
 #all_0210 = np.load("../data/processed/all_0210.npy")
 #all_data = np.concatenate([all_0130, all_0210])
 
-all_data = all_0130
+all_data = np.concatenate([all_0130, all_0170])
+del(all_0130)
+del(all_0170)
 
 if treshold_data:
 	all_data[all_data < treshold_value] = 0
 
-train_data = np.load("../data/processed/train.npy")
-test_data = np.load("../data/processed/test.npy")
+targets_0130 = np.load("../data/clean/targets/run_0130_targets.npy")
+targets_0210 = np.load("../data/clean/targets/run_0210_targets.npy")
+all_targets = np.concatenate([targets_0130, targets_0210])
 
-train_test = np.concatenate((train_data, test_data))
+labeled_0130 = np.load("../data/clean/images/run_0130_label_True.npy")
+labeled_0210 = np.load("../data/clean/images/run_0210_label_True.npy")
+all_labeled = np.concatenate([labeled_0130, labeled_0210])
+
+train_data, test_data, train_targets, test_targets = train_test_split(
+                                                        all_labeled,
+                                                        all_targets,
+                                                        test_size=0.33
+                                                        )
 
 if treshold_data:
 	train_test[train_test < treshold_value] = 0
@@ -110,7 +118,7 @@ mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
-        "include_MMD":True,
+        "include_MMD":False,
         }
 
 model_train_targets = to_categorical(train_targets)
