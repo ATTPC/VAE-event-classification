@@ -1,11 +1,12 @@
-import h5py
-import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 import pandas as pd
 from joblib import Parallel, delayed
+import h5py
+import numpy as np
+from skimage import util
 
 print("Matplot backend",  matplotlib.get_backend())
 
@@ -28,7 +29,7 @@ def make_images(projection, labeled):
         runs = ["0210", "0130"]
 
     else:
-        runs = ["0170", ]
+        runs = ["0130", "0150", "0190", "0210"]
 
     for run in runs:
 
@@ -64,16 +65,25 @@ def make_images(projection, labeled):
                 if len(xyzs) < point_cutoff:
                     discarded_events.append(evt_id)
                 else:
-                    events.append([xyzs, 1])
-
+                    events.append([xyzs, 0])
+            
+            n_keyerr = 0 
             for evt_id in junk_indices:
-                event = dataset[str(evt_id)]
+                try:
+                    event = dataset[str(evt_id)]
+                except KeyError:
+                    n_keyerr += 1
+                    discarded_events.append(evt_id)
+                    continue
+
                 xyzs = filtering(np.array(event))
 
                 if len(xyzs) < point_cutoff:
                     discarded_events.append(evt_id)
                 else:
-                    events.append([xyzs, 1])
+                    events.append([xyzs, 2])
+
+            print("n events disc. to keyErr", n_keyerr)
 
         else:
             for i in dataset:
@@ -93,7 +103,7 @@ def make_images(projection, labeled):
         discarded_events = np.array(discarded_events)
 
         np.save(
-            "../data/clean/discarded/discarded_events_{}.npy".format(run),
+            "../data/clean/discarded/discarded_events_{}_label_{}.npy".format(run, labeled),
             discarded_events)
 
         """
@@ -117,7 +127,7 @@ def make_images(projection, labeled):
         for i in range(len(normalized_charge_events)):
             events[i][0][:, 3] = normalized_charge_events[i]
 
-        images = np.empty((len(events), 128, 128, 3), dtype=np.uint8)
+        images = np.empty((len(events), 128, 128, 1), dtype=np.uint8)
         targets = np.empty(len(events), dtype=np.uint8)
 
         def make_image(event):
@@ -146,6 +156,8 @@ def make_images(projection, labeled):
             fig.canvas.draw()
             data = np.array(fig.canvas.renderer._renderer, dtype=np.uint8)
             data = np.delete(data, 3, axis=2)
+            data = util.invert(data[:, :, 0])
+            data = np.expand_dims(data, -1)
             plt.close()
 
             return data, t
@@ -161,11 +173,11 @@ def make_images(projection, labeled):
             targets[i] = target
 
         print("Saving...")
-        np.save("../data/clean/images/run_{}.npy".format(run), images/255)
+        np.save("../data/clean/images/run_{}_label_{}.npy".format(run, labeled), images/255)
 
         if labeled:
-            np.save("", targets)
+            np.save("../data/clean/targets/run_{}_targets.npy".format(run), targets)
 
 
 if __name__ == "__main__":
-    make_images("xy", False)
+    make_images("xy", True)
