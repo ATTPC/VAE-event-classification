@@ -224,7 +224,7 @@ class DRAW:
                 z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
             else:
                 with tf.variable_scope("sample", reuse=self.DO_SHARE):
-                    z = self.linear(h_enc, self.latent_dim)
+                    z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
 
             """ Decoder operations """
             h_dec, dec_state = self.decode(dec_state, z)
@@ -658,13 +658,13 @@ class DRAW:
                         end="",
                         )
 
-
+            """
             if all_lz[i] < 0:
                 print("broken training")
                 print("Lx = ", all_lx[i])
                 print("Lz = ", all_lz[i])
-
                 break
+            """
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
                 break
@@ -827,6 +827,7 @@ class DRAW:
                     sizes than H*W")
 
         out_size = 0
+
         deconv_architecture = {
                 "n_layers": 4,
                 "strides": [2, 2, 2, 2, ],
@@ -836,6 +837,18 @@ class DRAW:
                 "input_dim": 4,
                 "input_filters": 128,
                }
+        """
+
+        deconv_architecture = {
+                "n_layers": 1,
+                "strides": [3, ],
+                "kernel_size": [3, ],
+                "filters": [50, ],
+                "activation": [1,],
+                "input_dim": 5,
+                "input_filters": 128,
+               }
+        """
 
         with tf.variable_scope("write", reuse=self.DO_SHARE):
 
