@@ -215,9 +215,10 @@ class DRAW:
                 x_hat = c_prev
             else:
                 x_hat = self.x - tf.sigmoid(c_prev)
-            
+
             """ Encoder operations  """
             r = self.read(self.x, x_hat, h_dec_prev)
+            #r = tf.tanh(r)
             h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
 
             if self.include_KL:
@@ -228,6 +229,7 @@ class DRAW:
 
             """ Decoder operations """
             h_dec, dec_state = self.decode(dec_state, z)
+            #dropout_h_dec = tf.keras.layers.Dropout(0.1)(h_dec, )
             self.canvas_seq[t] = c_prev + self.write(h_dec)
 
             """ Storing and updating values """
@@ -264,7 +266,6 @@ class DRAW:
             self.DO_SHARE = True
 
         if self.train_classifier: 
-            
             z_stacked = tf.stack(self.z_seq)
             z_stacked = tf.transpose(self.z_seq, perm=[1, 0, 2])
             Z = tf.reshape(z_stacked, (-1, self.T*self.latent_dim))
@@ -832,7 +833,7 @@ class DRAW:
                 "n_layers": 4,
                 "strides": [2, 2, 2, 2, ],
                 "kernel_size": [2, 2, 2, 2,  ],
-                "filters": [50, 64, 32, 5, ],
+                "filters": [50, 32, 16, 5, ],
                 "activation": [1, 0, 1, 0],
                 "input_dim": 4,
                 "input_filters": 128,
@@ -856,6 +857,7 @@ class DRAW:
             ifilters = deconv_architecture["input_filters"]
 
             out = self.linear(h_dec, idim*idim*ifilters)
+            out = tf.nn.relu(out)
             out = tf.reshape(
                     out, 
                     (tf.shape(h_dec)[0], idim, idim, ifilters)

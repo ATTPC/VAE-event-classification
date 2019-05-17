@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 def longform_latent(latent,):
     longform_samples = np.zeros((
@@ -56,11 +56,11 @@ def compute_accuracy(X, y, Xtest, ytest):
 
     return train_score, test_score 
 
-T = 8
-enc_size = 200
-dec_size = 900
+T = 6
+enc_size = 500
+dec_size = 150
 latent_dim  = 3
-epochs = 50
+epochs = 20
 
 treshold_value = 0.3
 treshold_data = False
@@ -79,19 +79,11 @@ del(all_0170)
 if treshold_data:
 	all_data[all_data < treshold_value] = 0
 
-targets_0130 = np.load("../data/clean/targets/run_0130_targets.npy")
-targets_0210 = np.load("../data/clean/targets/run_0210_targets.npy")
-all_targets = np.concatenate([targets_0130, targets_0210])
+train_data = np.load("../data/clean/images/train.npy")
+test_data = np.load("../data/clean/images/test.npy")
 
-labeled_0130 = np.load("../data/clean/images/run_0130_label_True.npy")
-labeled_0210 = np.load("../data/clean/images/run_0210_label_True.npy")
-all_labeled = np.concatenate([labeled_0130, labeled_0210])
-
-train_data, test_data, train_targets, test_targets = train_test_split(
-                                                        all_labeled,
-                                                        all_targets,
-                                                        test_size=0.33
-                                                        )
+train_targets = np.load("../data/clean/targets/train_targets.npy")
+test_targets = np.load("../data/clean/targets/test_targets.npy")
 
 if treshold_data:
 	train_test[train_test < treshold_value] = 0
@@ -118,7 +110,7 @@ mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
-        "include_MMD":False,
+        "include_MMD":True,
         }
 
 model_train_targets = to_categorical(train_targets)
