@@ -16,10 +16,11 @@ import signal
 import sys
 
 from batchmanager import BatchManager
+from model import LatentModel
 
 
 
-class DRAW:
+class DRAW(LatentModel):
     """
     An implementation of the DRAW algorithm proposed by Gregor et. al 
     ArXiv id: 1502.04623v2
@@ -54,16 +55,14 @@ class DRAW:
             run=None
             ):
 
-        tf.reset_default_graph()
 
         # adding save on interrupt
-        signal.signal(signal.SIGINT, self.signal_handler)
+
+        super().__init__(X, latent_dim, beta, mode_config)
         
         self.T = T
         self.dec_size = dec_size 
         self.enc_size = enc_size
-        self.latent_dim = latent_dim
-        self.beta = beta
         
         # set batch size as placeholder to be fed with each run
 
@@ -80,7 +79,6 @@ class DRAW:
                                                     test_size=test_split,
                                                 )
 
-        self.data_shape = self.X.shape
 
         self.use_attention = use_attention
         self.use_conv = use_conv
@@ -88,11 +86,6 @@ class DRAW:
         self.restore_mode = False
         self.simulated_mode = False
 
-        if len(self.data_shape) == 3 or len(self.data_shape) == 4:
-            self.n_input = self.data_shape[1] * self.data_shape[2]
-            self.H = self.data_shape[1]
-            self.W = self.data_shape[2]
-            self.n_data = self.data_shape[0]
 
         else:
             print("""Wrong input dimensions expected
@@ -109,45 +102,7 @@ class DRAW:
 
                 setattr(self, key, val)
 
-        
-        if not mode_config is None:
-            for key, val in mode_config.items():
-                setattr(self, key, val)
-
         self.DO_SHARE = None
-        self.compiled = False
-        self.grad_op = False
-
-
-    def CompileModel(
-            self,
-            graph_kwds=None,
-            loss_kwds=None,
-            ):
-        """
-        Paramters 
-        ---------
-
-        graph_kwds : dictionary with keywords
-            initializer - one of tf.initializers uninstantiatiated
-
-        loss_kwds : dictionary with keywords
-            loss - one of tf.losses uninstantiated
-
-        Compiles model graph with reconstruction and KL loss
-        """
-        
-        if graph_kwds is None:
-            self._ModelGraph()
-        else:
-            self._ModelGraph(**graph_kwds)
-
-        if loss_kwds is None:
-            self._ModeLoss()
-        else:
-            self._ModelLoss(**loss_kwds)
-
-        self.compiled = True
 
 
     def _ModelGraph(
@@ -279,23 +234,6 @@ class DRAW:
             self.logits = tf.nn.softmax(tmp)
 
 
-    def predict(self, sess, X):
-        tmp = {self.x: X,}# self.batch_size: X.shape[0]}
-        return np.argmax(sess.run(self.logits, tmp), 1)
-
-
-    def predict_proba(self, sess, X):
-        tmp = {self.x:  X, }#self.batch_size: X.shape[0]}
-        return sess.run(self.logits, tmp)
-
-
-    def score(self, sess, X, y, metric=accuracy_score, metric_kwds={}):
-        predicted = self.predict(sess, X)
-        t  = np.argmax(y, 1)
-        return metric(t, predicted, **metric_kwds)
-
-
-
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
 
         """
@@ -341,26 +279,46 @@ class DRAW:
 
         elif self.include_MMD:
 
+            n = self.batch_size
+
             beta = tf.distributions.Beta(0.4, 0.5)
             norm1 = tf.distributions.Normal(0., 1.)
             norm2 = tf.distributions.Normal(6., 1.)
-            binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
+            norm3 = tf.distributions.Normal(-6., 1.)
+            binom = tf.distributions.Multinomial(1., probs=[4/10, 2/10, 4/10])
             self.Lz = 0
+            
+            """
+            size  = self.T * self.latent_dim
+            all_z = tf.transpose(tf.stack(self.z_seq), (1, 0, 2))
+            all_z = tf.reshape(all_z, (n, size))
 
+            y1 = norm1.sample((n, size))
+            y2 = norm2.sample((n, size))
+            y3 = norm3.sample((n, size))
+
+            w = binom.sample((size))
+            ref = w[:,0]*y1 + w[:,1]*y2 + w[:,2]*y3
+            #print("FUCKO", w.get_shape(), y1.get_shape())
+            self.Lz = self.compute_mmd(ref, all_z)
+
+            """
             for t in range(self.T):
                 z = self.z_seq[t]
                 n = self.batch_size
 
                 y1 = norm1.sample((n, self.latent_dim))
                 y2 = norm2.sample((n, self.latent_dim))
-                w = binom.sample((n, self.latent_dim))[:, :, 0]
-                ref = w*y1 + (1 - w)*y2
+                y3 = norm3.sample((n, self.latent_dim))
+
+                w = binom.sample((n, self.latent_dim))
+                ref = w[:,:, 0]*y1 + w[:,:,1]*y2 + w[:,:,2]*y3
 
                 #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
                 mmd = self.compute_mmd(ref, z)
                 self.Lz += mmd
 
-            self.Lz = self.beta*self.Lz - self.T/2
+            self.Lz = self.beta*self.Lz #- self.T/2
 
         else:
             self.Lz = tf.constant(0, dtype=tf.float32)*self.Lx
@@ -857,7 +815,6 @@ class DRAW:
             ifilters = deconv_architecture["input_filters"]
 
             out = self.linear(h_dec, idim*idim*ifilters)
-            out = tf.nn.relu(out)
             out = tf.reshape(
                     out, 
                     (tf.shape(h_dec)[0], idim, idim, ifilters)
