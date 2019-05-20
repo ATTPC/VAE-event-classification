@@ -1,4 +1,4 @@
-import numpy as np 
+import numpy as np
 import tensorflow as tf
 
 from keras.layers import Flatten, Dense, Input, ZeroPadding2D
@@ -19,7 +19,6 @@ from batchmanager import BatchManager
 from model import LatentModel
 
 
-
 class DRAW(LatentModel):
     """
     An implementation of the DRAW algorithm proposed by Gregor et. al 
@@ -33,7 +32,6 @@ class DRAW(LatentModel):
     Model is compiled with the CompileModel and trained with the Train method. 
     """
 
-
     def __init__(
             self,
             T,
@@ -44,8 +42,8 @@ class DRAW(LatentModel):
             beta=1,
 
             train_classifier=False,
-            use_attention = None,
-            use_conv = None,
+            use_attention=None,
+            use_conv=None,
 
             X_classifier=None,
             Y_classifier=None,
@@ -53,43 +51,36 @@ class DRAW(LatentModel):
             mode_config=None,
             test_split=0,
             run=None
-            ):
-
+    ):
 
         # adding save on interrupt
 
         super().__init__(X, latent_dim, beta, mode_config)
-        
+
         self.T = T
-        self.dec_size = dec_size 
+        self.dec_size = dec_size
         self.enc_size = enc_size
-        
+
         # set batch size as placeholder to be fed with each run
 
-        self.X = X 
+        self.X = X
         self.eps = 1e-8
-        
-        self.train_classifier=train_classifier
+
+        self.train_classifier = train_classifier
 
         if self.train_classifier:
             test_split = test_split if test_split != 0 else 0.25
             self.X_c, self.X_c_test, self.Y_c, self.Y_c_test = train_test_split(
-                                                    X_classifier,
-                                                    Y_classifier,
-                                                    test_size=test_split,
-                                                )
-
+                X_classifier,
+                Y_classifier,
+                test_size=test_split,
+            )
 
         self.use_attention = use_attention
         self.use_conv = use_conv
 
         self.restore_mode = False
         self.simulated_mode = False
-
-
-        else:
-            print("""Wrong input dimensions expected
-                    x_train to have DIM == 3 or DIM == 4 got DIM == {}""".format(len(self.data_shape)))
 
         if self.use_attention and attn_config is None:
             print("""If attention is used then parameters read_N, write_N and corresponding 
@@ -104,13 +95,12 @@ class DRAW(LatentModel):
 
         self.DO_SHARE = None
 
-
     def _ModelGraph(
             self,
             initializer=tf.initializers.glorot_normal,
             n_encoder_cells=2,
             n_decoder_cells=2,
-            ):
+    ):
 
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
@@ -122,23 +112,25 @@ class DRAW(LatentModel):
 
         for i in range(n_encoder_cells):
             encoder_cells.append(
-                            tf.nn.rnn_cell.LSTMCell(
-                                        self.enc_size,
-                                        state_is_tuple=True,
-                                        activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                                        initializer=initializer, 
-                                    )
-                            )
+                tf.nn.rnn_cell.LSTMCell(
+                    self.enc_size,
+                    state_is_tuple=True,
+                    activity_regularizer=tf.contrib.layers.l2_regularizer(
+                        0.01),
+                    initializer=initializer,
+                )
+            )
 
         for i in range(n_decoder_cells):
             decoder_cells.append(
-                            tf.nn.rnn_cell.LSTMCell(
-                                        self.dec_size,
-                                        state_is_tuple=True,
-                                        activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                                        initializer=initializer, 
-                                    )
-                            )
+                tf.nn.rnn_cell.LSTMCell(
+                    self.dec_size,
+                    state_is_tuple=True,
+                    activity_regularizer=tf.contrib.layers.l2_regularizer(
+                        0.01),
+                    initializer=initializer,
+                )
+            )
 
         self.encoder = tf.nn.rnn_cell.MultiRNNCell(encoder_cells)
         self.decoder = tf.nn.rnn_cell.MultiRNNCell(decoder_cells)
@@ -154,7 +146,8 @@ class DRAW(LatentModel):
         self.z_seq = [0]*self.T
         self.dec_state_seq = [0]*self.T
 
-        self.mus, self.logsigmas, self.sigmas = [0]*self.T, [0]*self.T, [0]*self.T
+        self.mus, self.logsigmas, self.sigmas = [
+            0]*self.T, [0]*self.T, [0]*self.T
 
         # initial states
         h_dec_prev = tf.zeros((self.batch_size, self.dec_size))
@@ -162,7 +155,7 @@ class DRAW(LatentModel):
 
         dec_state = self.decoder.zero_state(self.batch_size, tf.float32)
         enc_state = self.encoder.zero_state(self.batch_size, tf.float32)
-    
+
         # Unrolling the computational graph for the LSTM
         for t in range(self.T):
             # computing the error image
@@ -174,10 +167,12 @@ class DRAW(LatentModel):
             """ Encoder operations  """
             r = self.read(self.x, x_hat, h_dec_prev)
             #r = tf.tanh(r)
-            h_enc, enc_state = self.encode(enc_state, tf.concat([r, h_dec_prev], 1))
+            h_enc, enc_state = self.encode(
+                enc_state, tf.concat([r, h_dec_prev], 1))
 
             if self.include_KL:
-                z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
+                z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(
+                    h_enc)
             else:
                 with tf.variable_scope("sample", reuse=self.DO_SHARE):
                     z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
@@ -220,22 +215,20 @@ class DRAW(LatentModel):
 
             self.DO_SHARE = True
 
-        if self.train_classifier: 
+        if self.train_classifier:
             z_stacked = tf.stack(self.z_seq)
             z_stacked = tf.transpose(self.z_seq, perm=[1, 0, 2])
             Z = tf.reshape(z_stacked, (-1, self.T*self.latent_dim))
 
             with tf.variable_scope("logreg"):
                 tmp = self.linear(
-                        Z,
-                        self.Y_c.shape[1],
-                        )
+                    Z,
+                    self.Y_c.shape[1],
+                )
 
             self.logits = tf.nn.softmax(tmp)
 
-
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
-
         """
         Parameters
         ----------
@@ -251,10 +244,11 @@ class DRAW(LatentModel):
             reconst_loss = self.binary_crossentropy
 
         x_recons = tf.sigmoid(self.canvas_seq[-1])
-        #x_recons = tf.clip_by_value(self.canvas_seq[-1], 0, 1) 
+        #x_recons = tf.clip_by_value(self.canvas_seq[-1], 0, 1)
 
-        self.Lx = tf.reduce_mean(tf.reduce_sum(reconst_loss(self.x, x_recons), 1))
-        #Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
+        self.Lx = tf.reduce_mean(tf.reduce_sum(
+            reconst_loss(self.x, x_recons), 1))
+        # Lx = tf.losses.mean_squared_error(x, x_recons)  # tf.reduce_mean(Lx)
         #Lx = tf.losses.mean_pairwise_squared_error(x, x_recons)
         self.scale_kl = scale_kl
 
@@ -287,7 +281,7 @@ class DRAW(LatentModel):
             norm3 = tf.distributions.Normal(-6., 1.)
             binom = tf.distributions.Multinomial(1., probs=[4/10, 2/10, 4/10])
             self.Lz = 0
-            
+
             """
             size  = self.T * self.latent_dim
             all_z = tf.transpose(tf.stack(self.z_seq), (1, 0, 2))
@@ -312,13 +306,13 @@ class DRAW(LatentModel):
                 y3 = norm3.sample((n, self.latent_dim))
 
                 w = binom.sample((n, self.latent_dim))
-                ref = w[:,:, 0]*y1 + w[:,:,1]*y2 + w[:,:,2]*y3
+                ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 + w[:, :, 2]*y3
 
                 #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
                 mmd = self.compute_mmd(ref, z)
                 self.Lz += mmd
 
-            self.Lz = self.beta*self.Lz #- self.T/2
+            self.Lz = self.beta*self.Lz  # - self.T/2
 
         else:
             self.Lz = tf.constant(0, dtype=tf.float32)*self.Lx
@@ -328,144 +322,14 @@ class DRAW(LatentModel):
         self.cost = cost
 
         if self.train_classifier:
-            self.y_batch = tf.placeholder(tf.float32, shape=(None, self.Y_c.shape[1]))
+            self.y_batch = tf.placeholder(
+                tf.float32, shape=(None, self.Y_c.shape[1]))
             self.classifier_cost = tf.reduce_mean(
-                                tf.reduce_sum(
-                                    self.binary_crossentropy(self.y_batch, self.logits)
-                                    )
-                                )
-
-
-
-    def binary_crossentropy(self, t, o):
-        return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
-
-    def compute_kernel(self, x, y):
-        """
-        Copied from Shengjia Zhao:
-        http://szhao.me/2017/06/10/a-tutorial-on-mmd-variational-autoencoders.html
-        """
-        x_size = tf.shape(x)[0]
-        y_size = tf.shape(y)[0]
-        dim = tf.shape(x)[1]
-        tiled_x = tf.tile(tf.reshape(x, tf.stack([x_size, 1, dim])), tf.stack([1, y_size, 1]))
-        tiled_y = tf.tile(tf.reshape(y, tf.stack([1, y_size, dim])), tf.stack([x_size, 1, 1]))
-        return tf.exp(-tf.reduce_mean(tf.square(tiled_x - tiled_y), axis=2) / tf.cast(dim, tf.float32))
-
-    def compute_mmd(self, x, y, sigma_sqr=1.0):
-        """
-        Copied from Shengjia Zhao:
-        http://szhao.me/2017/06/10/a-tutorial-on-mmd-variational-autoencoders.html
-        """
-        x_kernel = self.compute_kernel(x, x)
-        y_kernel = self.compute_kernel(y, y)
-        xy_kernel = self.compute_kernel(x, y)
-        return tf.reduce_mean(x_kernel) + tf.reduce_mean(y_kernel) - 2 * tf.reduce_mean(xy_kernel)
-
-    def computeGradients(
-            self,
-            optimizer_class, 
-            opt_args=[],
-            opt_kwds={},
-            ):
-
-        """
-        Parameters:
-        ----------
-
-        optimizer_class : One of tf.optimizers, uninstantiated
-
-        opt_args : arguments to the optimizer, ordered
-
-        opt_kwds : dictionary of keyword arguments to optimizer
-
-        Computes the losses for the model. Train method is contingent on this being
-        called first. 
-
-        Takes an tf.optimizers class and corresponding arguments and kwdargs to be instantiated. 
-        """
-
-        if not self.compiled:
-            print("please compile model first")
-            return 1
-
-        optimizer = optimizer_class(*opt_args, **opt_kwds) 
-        grads = optimizer.compute_gradients(self.cost)
-
-        for i, (g, v) in enumerate(grads):
-            if g is not None:
-                grads[i] = (tf.clip_by_norm(g, 5), v)
-
-        self.train_op = optimizer.apply_gradients(grads)
-
-        self.fetches = []
-        self.fetches.extend([
-            self.Lx,
-            self.Lz,
-            self.z_seq,
-            self.dec_state_seq,
-            self.train_op
-            ])
-
-        if self.train_classifier:
-
-            classifier_grads = optimizer.compute_gradients(self.classifier_cost)
-
-            for i, (g, v) in enumerate(classifier_grads):
-                if g is not None:
-                    classifier_grads[i] = (tf.clip_by_norm(g, 5), v)
-
-            self.classifier_op = optimizer.apply_gradients(classifier_grads)
-            self.clf_fetches = [self.classifier_cost, self.classifier_op]
-
-        self.grad_op = True
-
-
-    def storeResult(
-            self, 
-            sess,
-            feed_dict,
-            data_dir,
-            model_dir,
-            i
-            ):
-
-        """
-        Paramters 
-        ---------
-
-        sess : a tensorflow session used in trainig 
-
-        feed_dict : dictionary with batch of inputs 
-
-        data_dir : directory to save reconstructed samples 
-
-        model_dir : directory to save model checkpoint
-
-        Runs an single batch through the model and saves reconstructions and 
-        a model checkpoint
-        """
-
-        print()
-        print("Saving model and canvasses | epoch: {}".format(i))
-
-        canvasses = sess.run(self.canvas_seq, feed_dict)
-        canvasses = np.array(canvasses)
-        references = np.array(feed_dict[self.x])
-        epoch = "_epoch" + str(i)
-        
-        filename = data_dir+"/simulated/canvasses"+epoch+".npy" if self.simulated_mode else data_dir+"/canvasses"+epoch+".npy"
-        np.save(filename, canvasses)
-
-        model_fn = model_dir+"/draw_attn"+epoch+".ckpt" if self.use_attention else model_dir+"/draw_no_attn"+epoch+".ckpt" 
-        if self.simulated_mode:
-            model_fn = model_dir+"/simulated/draw_attn"+epoch+".ckpt" if self.use_attention else model_dir+"/simulated/draw_no_attn"+epoch+".ckpt"
-
-        self.saver.save(sess, model_fn)
-
-        ref_fn = data_dir+"/simulated/references"+epoch+".npy" if self.simulated_mode else data_dir+"/references"+epoch+".npy"
-        np.save(ref_fn, references)
-
+                tf.reduce_sum(
+                    self.binary_crossentropy(
+                        self.y_batch, self.logits)
+                )
+            )
 
     def train(
             self,
@@ -477,15 +341,14 @@ class DRAW(LatentModel):
             save_checkpoints=True,
             earlystopping=True,
             checkpoint_fn=None,
-            ):
-
+    ):
         """
         Paramters
         ---------
 
 
         """
-        
+
         if not (self.compiled and self.grad_op):
             print("cannot train before model is compiled and gradients are computed")
             return
@@ -495,7 +358,7 @@ class DRAW(LatentModel):
         self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
 
-        #set session as self attribute to be available from sigint call
+        # set session as self attribute to be available from sigint call
         self.sess = sess
         run_opts = tf.RunOptions(report_tensor_allocations_upon_oom=True)
 
@@ -517,8 +380,8 @@ class DRAW(LatentModel):
                 self.saver.restore(sess, checkpoint_fn)
                 break
 
-            Lxs = [] 
-            Lzs = [] 
+            Lxs = []
+            Lzs = []
             logloss_train = []
 
             bm_inst = BatchManager(self.n_data, minibatch_size)
@@ -534,7 +397,8 @@ class DRAW(LatentModel):
                 batch = self.X[ind]
                 batch = batch.reshape(np.size(ind), self.n_input)
 
-                feed_dict = {self.x: batch, }#self.batch_size: minibatch_size}
+                # self.batch_size: minibatch_size}
+                feed_dict = {self.x: batch, }
                 if self.scale_kl:
                     feed_dict[self.kl_scale] = np.array([i/epochs, ])
 
@@ -545,17 +409,21 @@ class DRAW(LatentModel):
                 Lzs.append(Lz)
 
                 if self.train_classifier:
-                    if  (j % train_interval) == 0:
+                    if (j % train_interval) == 0:
 
                         batch_ind = next(clf_bm_inst)
                         #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
                         clf_batch = self.X_c[batch_ind]
-                        clf_batch = clf_batch.reshape(np.size(batch_ind), self.n_input)
+                        clf_batch = clf_batch.reshape(
+                            np.size(batch_ind), self.n_input)
 
                         t_batch = self.Y_c[batch_ind]
 
-                        clf_feed_dict = {self.x: clf_batch, self.y_batch: t_batch,}# self.batch_size: minibatch_size}
-                        clf_cost, _ = sess.run(self.clf_fetches, clf_feed_dict, options=run_opts)
+                        # self.batch_size: minibatch_size}
+                        clf_feed_dict = {self.x: clf_batch,
+                                         self.y_batch: t_batch, }
+                        clf_cost, _ = sess.run(
+                            self.clf_fetches, clf_feed_dict, options=run_opts)
                         logloss_train.append(clf_cost)
 
             if self.scale_kl:
@@ -593,29 +461,29 @@ class DRAW(LatentModel):
                             to_pred,
                             targets,
                             metric=f1_score,
-                            metric_kwds={"average": None, "labels":[0, 1, 2]}))
+                            metric_kwds={"average": None, "labels": [0, 1, 2]}))
                         score += (n_bi/tot) * tmp
 
                     scores[k] = score
 
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
                         train score {}  | test score {}".format(
-                        i,
-                        all_lx[i],
-                        all_lz[i],
-                        all_clf_loss[i],
-                        scores[0],
-                        scores[1]
-                        ),
-                        )
+                    i,
+                    all_lx[i],
+                    all_lz[i],
+                    all_clf_loss[i],
+                    scores[0],
+                    scores[1]
+                ),
+                )
             else:
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
-                        i,
-                        all_lx[i],
-                        all_lz[i]
-                        ),
-                        end="",
-                        )
+                    i,
+                    all_lx[i],
+                    all_lz[i]
+                ),
+                    end="",
+                )
 
             """
             if all_lz[i] < 0:
@@ -627,10 +495,10 @@ class DRAW(LatentModel):
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
                 break
-            
-            if i >= n_mvavg: 
+
+            if i >= n_mvavg:
                 to_average[ta_which] = tf.reduce_mean(
-                        tf.reduce_sum(all_lx[i - n_mvavg: i] + all_lz[i - n_mvavg: i])).eval()
+                    tf.reduce_sum(all_lx[i - n_mvavg: i] + all_lz[i - n_mvavg: i])).eval()
                 ta_which += 1
 
             if (1 + i) % n_mvavg == 0 and i >= n_mvavg:
@@ -645,47 +513,22 @@ class DRAW(LatentModel):
                     if moving_average[mvavg_index - 1] < moving_average[mvavg_index] and do_earlystop:
                         print("Earlystopping")
 
-                        return all_lx, all_lz 
+                        return all_lx, all_lz
 
                 to_average = [0] * n_mvavg
 
-                if save_checkpoints: 
+                if save_checkpoints:
                     self.storeResult(sess, feed_dict, data_dir, model_dir, i)
 
         return all_lx, all_lz
-
 
     def encode(self, state, input):
         with tf.variable_scope("encoder", reuse=self.DO_SHARE):
             return self.encoder(input, state)
 
-
     def decode(self, state, input):
         with tf.variable_scope("decoder", reuse=self.DO_SHARE):
             return self.decoder(input, state)
-
-
-    def linear(
-            self,
-            x, 
-            output_dim,
-            regularizer=tf.contrib.layers.l2_regularizer,
-            lmbd=0.1,
-            ):
-
-        w = tf.get_variable("w", [x.get_shape()[1], output_dim],
-                            regularizer=regularizer(lmbd),
-                            )
-
-        b = tf.get_variable(
-            "b",
-            [output_dim],
-            initializer=tf.constant_initializer(0.0),
-            regularizer=regularizer(lmbd))
-
-        return tf.matmul(x, w) + b
-
-
 
     def sample(self, h_enc):
         """
@@ -705,8 +548,8 @@ class DRAW(LatentModel):
 
         with tf.variable_scope("sigma", reuse=self.DO_SHARE):
             sigma = self.linear(h_enc, self.latent_dim,
-                        lmbd=0.1,
-                        regularizer=tf.contrib.layers.l2_regularizer)
+                                lmbd=0.1,
+                                regularizer=tf.contrib.layers.l2_regularizer)
             sigma = tf.nn.relu(sigma)
 
             sigma = tf.clip_by_value(sigma, 1, 100)
@@ -714,25 +557,22 @@ class DRAW(LatentModel):
 
         return (mu + sigma, mu, logsigma, sigma)
 
-
     def read_no_attn(self, x, x_hat, h_dec_prev):
         return tf.concat([x, x_hat], 1)
-
 
     def write_no_attn(self, h_dec):
         with tf.variable_scope("write", reuse=self.DO_SHARE):
             return self.linear(h_dec, self.n_input)
 
-
     def read_conv(self, x, x_hat, h_dec_prev):
         conv_architecture = {
-                "n_layers": 4,
-                "filters": [40, 256, 128, 5],
-                "kernel_size": [2, 3, 2, 2],
-                "strides": [2, 2, 1, 1],
-                "pool": [1, 0, 1, 0] ,
-                "activation": [0, 1, 0, 1],
-                }
+            "n_layers": 4,
+            "filters": [40, 256, 128, 5],
+            "kernel_size": [2, 3, 2, 2],
+            "strides": [2, 2, 1, 1],
+            "pool": [1, 0, 1, 0],
+            "activation": [0, 1, 0, 1],
+        }
 
         with tf.variable_scope("read", reuse=self.DO_SHARE):
 
@@ -752,14 +592,14 @@ class DRAW(LatentModel):
                 pool = conv_architecture["pool"][i]
 
                 out = tf.keras.layers.Conv2D(
-                        filters=filters,
-                        kernel_size=kernel_size,
-                        strides=strides,
-                        padding="valid",
-                        use_bias=True,
-                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        )(out)
+                    filters=filters,
+                    kernel_size=kernel_size,
+                    strides=strides,
+                    padding="valid",
+                    use_bias=True,
+                    kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                )(out)
 
                 if pool:
                     out = tf.keras.layers.MaxPool2D(2)(out)
@@ -779,7 +619,6 @@ class DRAW(LatentModel):
             out = tf.reshape(out, (tf.shape(x)[0], flat_shape))
             return out
 
-
     def write_conv(self, h_dec):
         if h_dec.get_shape()[1] > (self.H*self.W):
             raise ValueError("decoder size is not implemented to handle larger \
@@ -788,14 +627,14 @@ class DRAW(LatentModel):
         out_size = 0
 
         deconv_architecture = {
-                "n_layers": 4,
-                "strides": [2, 2, 2, 2, ],
-                "kernel_size": [2, 2, 2, 2,  ],
-                "filters": [50, 32, 16, 5, ],
-                "activation": [1, 0, 1, 0],
-                "input_dim": 4,
-                "input_filters": 128,
-               }
+            "n_layers": 4,
+            "strides": [2, 2, 2, 2, ],
+            "kernel_size": [2, 2, 2, 2, ],
+            "filters": [50, 32, 16, 5, ],
+            "activation": [1, 0, 1, 0],
+            "input_dim": 4,
+            "input_filters": 128,
+        }
         """
 
         deconv_architecture = {
@@ -816,9 +655,9 @@ class DRAW(LatentModel):
 
             out = self.linear(h_dec, idim*idim*ifilters)
             out = tf.reshape(
-                    out, 
-                    (tf.shape(h_dec)[0], idim, idim, ifilters)
-                    )
+                out,
+                (tf.shape(h_dec)[0], idim, idim, ifilters)
+            )
 
             input_size = idim
 
@@ -832,18 +671,18 @@ class DRAW(LatentModel):
                 kernel_size = deconv_architecture["kernel_size"][i]
                 strides = deconv_architecture["strides"][i]
 
-                out_size = strides*(input_size - 1) + kernel_size 
+                out_size = strides*(input_size - 1) + kernel_size
                 input_size = out_size
 
                 out = tf.keras.layers.Conv2DTranspose(
-                        filters=filters,
-                        kernel_size=(kernel_size, )*2,
-                        strides=strides,
-                        padding="valid",
-                        use_bias=True,
-                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        )(out)
+                    filters=filters,
+                    kernel_size=(kernel_size, )*2,
+                    strides=strides,
+                    padding="valid",
+                    use_bias=True,
+                    kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                )(out)
 
                 if not self.DO_SHARE:
                     print("Deconv shape: ", out.get_shape())
@@ -852,53 +691,53 @@ class DRAW(LatentModel):
                     out = tf.nn.relu(out)
 
             s = 2
-            k = self.H - s*(input_size - 1) 
+            k = self.H - s*(input_size - 1)
 
             if not self.DO_SHARE:
                 print("Last kernel: ", k)
 
             #out = tf.keras.layers.ZeroPadding2D((p, p))(out)
 
-            if k <= 0: 
+            if k <= 0:
                 k = input_size + s - self.H*s
 
                 if not self.DO_SHARE:
                     print("Last kernel: ", k)
 
                 out = tf.keras.layers.Conv2D(
-                        filters=1,
-                        kernel_size=(k, )*2,
-                        strides=s,
-                        padding="valid",
-                        use_bias=True,
-                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        )(out)
+                    filters=1,
+                    kernel_size=(k, )*2,
+                    strides=s,
+                    padding="valid",
+                    use_bias=True,
+                    kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                )(out)
 
             else:
                 out = tf.keras.layers.Conv2DTranspose(
-                        filters=1,
-                        kernel_size=(k, )*2,
-                        strides=s,
-                        padding="valid",
-                        use_bias=True,
-                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        )(out)
+                    filters=1,
+                    kernel_size=(k, )*2,
+                    strides=s,
+                    padding="valid",
+                    use_bias=True,
+                    kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                )(out)
 
         out = tf.reshape(out, (tf.shape(h_dec)[0], self.n_input))
         return out
 
-
     def attn_params(self, scope, h_dec, N):
         with tf.variable_scope(scope, reuse=self.DO_SHARE):
-            tmp = self.linear(h_dec, 4, regularizer=tf.contrib.layers.l1_regularizer)
+            tmp = self.linear(
+                h_dec, 4, regularizer=tf.contrib.layers.l1_regularizer)
             gx, gy, logsigma_sq, loggamma = tf.split(tmp, 4, 1)
 
         sigma_sq = tf.exp(logsigma_sq)
 
         if scope == "write":
-            delta = self.delta_w #tf.exp(logdelta)
+            delta = self.delta_w  # tf.exp(logdelta)
         else:
             delta = self.delta_r
 
@@ -909,7 +748,6 @@ class DRAW(LatentModel):
         #delta = (H - 1)/(N - 1) * delta
 
         return gx, gy, sigma_sq, delta, gamma
-
 
     def filters(self, gx, gy, sigma_sq, delta, gamma, N):
         i = tf.convert_to_tensor(np.arange(N, dtype=np.float32))
@@ -939,7 +777,6 @@ class DRAW(LatentModel):
 
         return Fx, Fy
 
-
     def read_attn(self, x, xhat, h_dec_prev, Fx, Fy, gamma, N):
         Fx_t = tf.transpose(Fx, perm=[0, 2, 1])
 
@@ -951,12 +788,12 @@ class DRAW(LatentModel):
 
         return gamma * tf.concat([FyxFx_t, FyxhatFx_t], 1)
 
-
     def write_attn(self, h_dec, Fx, Fy, gamma):
 
         with tf.variable_scope("writeW", reuse=self.DO_SHARE):
-            w = self.linear(h_dec, self.write_N_sq, tf.contrib.layers.l1_regularizer, lmbd=1e-5)
-        
+            w = self.linear(h_dec, self.write_N_sq,
+                            tf.contrib.layers.l1_regularizer, lmbd=1e-5)
+
         w = tf.reshape(w, [-1, self.write_N, self.write_N])
         Fy_t = tf.transpose(Fy, perm=[0, 2, 1])
 
@@ -965,151 +802,16 @@ class DRAW(LatentModel):
 
         return tmp/tf.maximum(gamma, self.eps)
 
-
     def read_a(self, x, xhat, h_dec_prev):
         params = self.attn_params("read", h_dec_prev, self.read_N)
         Fx, Fy = self.filters(*params, self.read_N)
         return self.read_attn(x, xhat, h_dec_prev, Fx, Fy, params[-1], self.read_N)
-
 
     def write_a(self, h_dec):
         params_m = self.attn_params("write", h_dec, self.write_N)
         Fx_m, Fy_m = self.filters(*params_m, self.write_N)
         return self.write_attn(h_dec, Fx_m, Fy_m, params_m[-1])
 
-    def generate_latent(self, sess, save_dir, X_tup, save=True):
-        """
-        Parameters
-        ----------
-
-        sess : a tf.InteractiveSession instance
-
-        save_dir : directory to save files to
-        
-        X_tup: tuple of training data and test data, cannot have len 1, cannot have len 1
-
-        Generates latent expressions, decoder states and reconstructions on both the training and test set.
-        """
-
-        lat_vals = []
-        recons_vals = []
-        decoder_states = []
-
-        for j, X in enumerate(X_tup):
-            n_latent = X.shape[0]
-            latent_values = np.zeros((self.T, n_latent, self.latent_dim))
-            dec_state_array = np.zeros((self.T, self.n_decoder_cells, 2, n_latent, self.dec_size))
-            reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
-            latent_bm = BatchManager(n_latent, 100)
-
-            #print("T", self.T, "dec size", self.dec_size)
-            #print("full dec_seq shape", dec_state_array.shape)
-
-            for ind in latent_bm:
-
-                to_feed = X[ind].reshape((np.size(ind), self.H*self.W))
-                feed_dict = {self.x: to_feed, self.batch_size: to_feed.shape[0]}
-                to_run = [self.z_seq, self.dec_state_seq, self.canvas_seq]
-
-                z_seq, dec_state_seq, canvasses = sess.run(to_run, feed_dict)
-                dec_state_seq = np.array(dec_state_seq)
-
-                #print("dec_state shape", dec_state_seq.shape)
-
-                latent_values[:, ind, :] = z_seq
-                reconstructions[:, ind, :] = canvasses
-                dec_state_seq = dec_state_seq
-                dec_state_array[:, :, :, ind, :] = dec_state_seq
-
-            lat_vals.append(latent_values)
-            recons_vals.append(reconstructions)
-            decoder_states.append(dec_state_array)
-
-
-        if save:
-            for i, X in enumerate(X_tup):
-
-                fn = "train_latent.npy" if i == 0 else "test_latent.npy"
-                r_fn = "train_reconst.npy" if i == 0 else "test_reconst.npy"
-                dec_fn = "train_decoder_states.npy" if i == 0 else "test_decoder_states.npy"
-
-                l = lat_vals[i]
-                r = recons_vals[i]
-                d = decoder_states[i]
-                
-                if not self.simulated_mode:
-                    np.save(save_dir+"/latent/" + fn, l)
-                    np.save(save_dir+"/" + r_fn, r)
-                    np.save(save_dir+"/" + dec_fn, d)
-                else:
-                    np.save(save_dir+"/simulated/latent/" + fn, l)
-                    np.save(save_dir+"/simulated/"+ r_fn, r)
-                    np.save(save_dir+"/simulated/" + dec_fn, d)
-
-        else:
-            return lat_vals, recons_vals, decoder_states
-
-
-
-    def generate_samples(self, save_dir, n_samples=100, rerun_latent=False, load_dir=None):
-
-        z_seq = [0]*self.T
-
-        if rerun_latent:
-            if load_dir is None:
-                print("To reconstruct please pass a directory from which to load samples and states")
-                return
-
-            latent_fn = load_dir+"/simulated/latent/train_latent.npy" if simulated_mode else load_dir+"/latent/train_latent.npy"
-            dec_state_fn = load_dir+"/simulated/train_decoder_states.npy" if simulated_mode else load_dir+"/train_decoder_states.npy"
-
-            decoder_states = np.load(dec_state_fn)
-            latent_samples = np.load(latent_fn)
-        
-        dec_state = self.decoder.zero_state(n_samples, tf.float32)
-        h_dec = tf.zeros((n_samples, self.dec_size))
-        c_prev = tf.zeros((n_samples, self.n_input))
-
-        for t in range(self.T):
-
-            if not rerun_latent:
-                mu, sigma = (0, 1) if t<1 else (0., 1)
-                sample = np.random.normal(mu, sigma, (n_samples, self.latent_dim)).astype(np.float32)
-            else:
-                sample = latent_samples[t, batch_size:2*batch_size, :].reshape((n_samples, self.latent_dim)).astype(np.float32)
-
-            z_seq[t] = sample
-            z = tf.convert_to_tensor(sample)
-            
-            if rerun_latent:
-                dec_state = decoder_states[t, :, self.batch_size:2*self.batch_size, :].reshape((2, self.batch_size, dec_size)).astype(np.float32)
-                dec_state = tf.nn.rnn_cell.LSTMStateTuple(dec_state[0], dec_state[1])
-
-            h_dec, dec_state = self.decode(dec_state, z)
-            self.canvas_seq[t] = (c_prev+self.write(h_dec)).eval()
-
-            h_dec_prev = h_dec
-            c_prev = self.canvas_seq[t]
-
-        canvasses = np.array(self.canvas_seq)
-
-        if not self.simulated_mode:
-            np.save(save_dir+"/generated/samples.npy", canvasses)
-            np.save(save_dir+"/generated/latent.npy", np.array(z_seq))
-        else:
-            np.save(save_dir+"/simulated/generated/samples.npy", canvasses)
-            np.save(save_dir+"/simulated/generated/latent.npy", np.array(z_seq))
-
-
-
-    def signal_handler(self, signal, frame):
-        """Function to be called when Ctrl + C is hit"""
-
-        if self.train_classifier:
-            self.generate_latent(self.sess, "~/tmp", (self.X_c, ) )
-
-        self.sess.close()
-        sys.exit(0)
 
 if __name__ == "__main__":
 
@@ -1123,51 +825,59 @@ if __name__ == "__main__":
     test_data = np.zeros((1100, 128, 128, 1))
 
     delta_write = 10
-    delta_read = 10 
-    
+    delta_read = 10
+
+    mode_config = {
+        "simulated_mdoe": False,
+        "restore_mode": False,
+        "include_KL": False,
+        "include_MMD": True,
+    }
+
     attn_config = {
-                "read_N": 10,
-                "write_N": 10,
-                "write_N_sq": 10**2,
-                "delta_w": delta_write,
-                "delta_r": delta_read,
-        
-                }
+        "read_N": 10,
+        "write_N": 10,
+        "write_N_sq": 10**2,
+        "delta_w": delta_write,
+        "delta_r": delta_read,
+
+    }
 
     draw_model = DRAW(
-            T,
-            dec_size,
-            enc_size,
-            latent_dim,
-            train_data,
-            use_conv=True
-            )
-    
+        T,
+        dec_size,
+        enc_size,
+        latent_dim,
+        train_data,
+        use_conv=True,
+        mode_config=mode_config,
+    )
+
     graph_kwds = {
-            "initializer": tf.initializers.glorot_normal
-            }
+        "initializer": tf.initializers.glorot_normal
+    }
 
     loss_kwds = {
-            "reconst_loss": None
-            }
+        "reconst_loss": None
+    }
 
-    draw_model.CompileModel(graph_kwds, loss_kwds)
+    draw_model.compile_model(graph_kwds, loss_kwds)
 
     opt = tf.train.AdamOptimizer
-    opt_args = [1e-1,]
+    opt_args = [1e-1, ]
     opt_kwds = {
-            "beta1": 0.5,
-            }
+        "beta1": 0.5,
+    }
 
-    draw_model.computeGradients(opt, opt_args, opt_kwds)
-    
+    draw_model.compute_gradients(opt, opt_args, opt_kwds)
+
     sess = tf.InteractiveSession()
 
     epochs = 2
     data_dir = "../data"
     model_dir = "../models"
 
-    draw_model.train(sess, epochs, data_dir, model_dir, )
+    draw_model.train(sess, epochs, data_dir, model_dir, 200)
 
     draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
 
