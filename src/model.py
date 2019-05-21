@@ -1,7 +1,10 @@
 import tensorflow as tf
 import signal
 import numpy as np
+
 from sklearn.metrics import accuracy_score, f1_score
+
+from batchmanager import BatchManager
 
 
 class LatentModel:
