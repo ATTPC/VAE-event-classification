@@ -4,6 +4,7 @@ import tensorflow as tf
 from keras.layers import Flatten, Dense, Input, ZeroPadding2D
 from keras.losses import categorical_crossentropy
 from keras.models import Model
+from keras.applications.vgg16 import VGG16
 
 from keras.layers import Conv2D, Conv2DTranspose, MaxPool2D
 
@@ -573,51 +574,77 @@ class DRAW(LatentModel):
             "pool": [1, 0, 1, 0],
             "activation": [0, 1, 0, 1],
         }
+        
+        if self.use_vgg: 
+            with tf.variable_scope("read", reuse=self.DO_SHARE):
+                with tf.variable_scope("gamma", reuse=self.DO_SHARE):
+                    gamma = self.linear(h_dec_prev, 1)
 
-        with tf.variable_scope("read", reuse=self.DO_SHARE):
+                x = gamma*x
+                x = tf.reshape(x, (tf.shape(x)[0], self.H, self.W, 1))
+                x_hat = tf.reshape(x_hat, (tf.shape(x)[0], self.H, self.W, 1))
 
-            gamma = self.linear(h_dec_prev, 1)
-            x = gamma*x
+                out = tf.concat((x, x_hat), axis=3)
+                out = tf.concat((out, tf.zeros_like(x)), axis=3)
+                out = tf.keras.layers.Conv2D(3, 2, activation="relu")(out)
 
-            x = tf.reshape(x, (tf.shape(x)[0], self.H, self.W, 1))
-            x_hat = tf.reshape(x_hat, (tf.shape(x)[0], self.H, self.W, 1))
+                vgg = VGG16(include_top=False, weights="imagenet", input_tensor=out)
+                out = vgg.layers[-1].output
 
-            out = tf.concat((x, x_hat), axis=3)
+                vgg_shape = out.get_shape()
+                flat_shape = vgg_shape[1]*vgg_shape[2]*vgg_shape[3]
 
-            for i in range(conv_architecture["n_layers"]):
+                out = tf.reshape(out, (tf.shape(x)[0], flat_shape))
+                with tf.variable_scope("out", reuse=self.DO_SHARE):
+                    out = self.linear(out, 100)
+                return out
 
-                filters = conv_architecture["filters"][i]
-                kernel_size = conv_architecture["kernel_size"][i]
-                strides = conv_architecture["strides"][i]
-                pool = conv_architecture["pool"][i]
+        else:
+            with tf.variable_scope("read", reuse=self.DO_SHARE):
+                print("WHAT THE FUCK")
 
-                out = tf.keras.layers.Conv2D(
-                    filters=filters,
-                    kernel_size=kernel_size,
-                    strides=strides,
-                    padding="valid",
-                    use_bias=True,
-                    kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                    bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                )(out)
+                gamma = self.linear(h_dec_prev, 1)
+                x = gamma*x
 
-                if pool:
-                    out = tf.keras.layers.MaxPool2D(2)(out)
+                x = tf.reshape(x, (tf.shape(x)[0], self.H, self.W, 1))
+                x_hat = tf.reshape(x_hat, (tf.shape(x)[0], self.H, self.W, 1))
+
+                out = tf.concat((x, x_hat), axis=3)
+
+                for i in range(conv_architecture["n_layers"]):
+
+                    filters = conv_architecture["filters"][i]
+                    kernel_size = conv_architecture["kernel_size"][i]
+                    strides = conv_architecture["strides"][i]
+                    pool = conv_architecture["pool"][i]
+
+                    out = tf.keras.layers.Conv2D(
+                        filters=filters,
+                        kernel_size=kernel_size,
+                        strides=strides,
+                        padding="valid",
+                        use_bias=True,
+                        kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    )(out)
+
+                    if pool:
+                        out = tf.keras.layers.MaxPool2D(2)(out)
+
+                    if not self.DO_SHARE:
+                        print("conv shape: ", out.get_shape())
+
+                    if conv_architecture["activation"][i]:
+                        out = tf.nn.relu(out)
+
+                out_shape = out.get_shape()
+                flat_shape = out_shape[1]*out_shape[2]*out_shape[3]
 
                 if not self.DO_SHARE:
-                    print("conv shape: ", out.get_shape())
+                    print("Final shape: ", flat_shape)
 
-                if conv_architecture["activation"][i]:
-                    out = tf.nn.relu(out)
-
-            out_shape = out.get_shape()
-            flat_shape = out_shape[1]*out_shape[2]*out_shape[3]
-
-            if not self.DO_SHARE:
-                print("Final shape: ", flat_shape)
-
-            out = tf.reshape(out, (tf.shape(x)[0], flat_shape))
-            return out
+                out = tf.reshape(out, (tf.shape(x)[0], flat_shape))
+                return out
 
     def write_conv(self, h_dec):
         if h_dec.get_shape()[1] > (self.H*self.W):
