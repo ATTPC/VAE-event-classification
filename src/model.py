@@ -144,11 +144,8 @@ class LatentModel:
                             self.clf_fetches, clf_feed_dict, options=run_opts)
                         logloss_train.append(clf_cost)
 
-            if self.scale_kl:
-                all_lz[i] = np.average(Lzs)
-            else:
-                all_lz[i] = np.average(Lzs)
-
+            tmp = np.average(Lzs)
+            all_lz[i] = tmp
             all_lx[i] = tf.reduce_mean(Lxs).eval()
 
             """Compute classifier performance """
@@ -264,7 +261,7 @@ class LatentModel:
             self._ModelGraph(**graph_kwds)
 
         if loss_kwds is None:
-            self._ModeLoss()
+            self._ModelLoss()
         else:
             self._ModelLoss(**loss_kwds)
         self.compiled = True
@@ -465,8 +462,13 @@ class LatentModel:
         for j, X in enumerate(X_tup):
             n_latent = X.shape[0]
             latent_values = np.zeros((self.T, n_latent, self.latent_dim))
-            dec_state_array = np.zeros(
-                (self.T, self.n_decoder_cells, 2, n_latent, self.dec_size))
+
+            is_seq_model = hasattr(self, "n_decoder_cells")
+            if is_seq_model:
+                dec_state_array = np.zeros(
+                    (self.T, self.n_decoder_cells, 2, n_latent, self.dec_size))
+            else:
+                dec_state_array = [0,]
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
             latent_bm = BatchManager(n_latent, 100)
 
@@ -487,8 +489,9 @@ class LatentModel:
 
                 latent_values[:, ind, :] = z_seq
                 reconstructions[:, ind, :] = canvasses
-                dec_state_seq = dec_state_seq
-                dec_state_array[:, :, :, ind, :] = dec_state_seq
+                if is_seq_model:
+                    dec_state_seq = dec_state_seq
+                    dec_state_array[:, :, :, ind, :] = dec_state_seq
 
             lat_vals.append(latent_values)
             recons_vals.append(reconstructions)
