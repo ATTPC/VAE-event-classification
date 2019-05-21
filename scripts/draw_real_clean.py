@@ -23,7 +23,7 @@ matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 def longform_latent(latent,):
     longform_samples = np.zeros((

@@ -56,11 +56,11 @@ def compute_accuracy(X, y, Xtest, ytest):
 
     return train_score, test_score 
 
-T = 22
+T = 5
 enc_size = 200
 dec_size = 900
-latent_dim  = 35
-epochs = 10
+latent_dim  = 20
+epochs = 20
 
 treshold_value = 0.3
 treshold_data = False
@@ -111,6 +111,7 @@ mode_config = {
         "restore_mode": False,
         "include_KL": False,
         "include_MMD":True,
+        "use_vgg":True
         }
 
 model_train_targets = to_categorical(train_targets)
@@ -123,12 +124,12 @@ draw_model = DRAW(
     all_data,
     beta=100,
     train_classifier=False,
-    use_conv=False,
-    use_attention=True,
+    use_conv=True,
+    use_attention=False,
     #X_classifier=train_data,
     #Y_classifier=model_train_targets,
     mode_config=mode_config,
-    attn_config=attn_config,
+    #attn_config=attn_config,
 )
 
 graph_kwds = {
@@ -142,7 +143,7 @@ loss_kwds = {
     "scale_kl": False,
 }
 
-draw_model.CompileModel(graph_kwds, loss_kwds)
+draw_model.compile_model(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
 opt_args = [1e-3, ]
@@ -150,7 +151,7 @@ opt_kwds = {
     "beta1": 0.5,
 }
 
-draw_model.computeGradients(opt, opt_args, opt_kwds)
+draw_model.compute_gradients(opt, opt_args, opt_kwds)
 
 sess = tf.InteractiveSession()
 
