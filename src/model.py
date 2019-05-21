@@ -1,7 +1,9 @@
 import tensorflow as tf
 import signal
 import numpy as np
+import sys
 
+from keras import backend as K
 from sklearn.metrics import accuracy_score, f1_score
 
 from batchmanager import BatchManager
@@ -29,9 +31,10 @@ class LatentModel:
         self.data_shape = self.X.shape
 
         if len(self.data_shape) == 3 or len(self.data_shape) == 4:
-            self.n_input = self.data_shape[1] * self.data_shape[2]
             self.H = self.data_shape[1]
             self.W = self.data_shape[2]
+            self.ch = self.data_shape[3]
+            self.n_input = self.H*self.W*self.ch
             self.n_data = self.data_shape[0]
         else:
             print("""Wrong input dimensions expected
@@ -45,6 +48,197 @@ class LatentModel:
 
         self.compiled = False
         self.grad_op = False
+
+    def train(
+            self,
+            sess,
+            epochs,
+            data_dir,
+            model_dir,
+            minibatch_size,
+            save_checkpoints=True,
+            earlystopping=True,
+            checkpoint_fn=None,
+    ):
+        """
+        Paramters
+        ---------
+
+
+        """
+
+        if not (self.compiled and self.grad_op):
+            print("cannot train before model is compiled and gradients are computed")
+            return
+
+        K.set_session(sess)
+
+        self.saver = tf.train.Saver()
+        tf.global_variables_initializer().run()
+
+        # set session as self attribute to be available from sigint call
+        self.sess = sess
+        run_opts = tf.RunOptions(report_tensor_allocations_upon_oom=True)
+
+        train_iters = self.data_shape[0] // minibatch_size
+        n_mvavg = 5
+        moving_average = [0] * (epochs // n_mvavg)
+        to_average = [0]*n_mvavg
+        ta_which = 0
+        all_lx = np.zeros(epochs)
+        all_lz = np.zeros(epochs)
+
+        if self.train_classifier:
+            train_interval = 10
+            clf_batch_size = self.X_c.shape[0]//(train_iters//train_interval)
+            all_clf_loss = np.zeros(epochs)
+
+        for i in range(epochs):
+            if self.restore_mode:
+                self.saver.restore(sess, checkpoint_fn)
+                break
+
+            Lxs = []
+            Lzs = []
+            logloss_train = []
+
+            bm_inst = BatchManager(self.n_data, minibatch_size)
+
+            if self.train_classifier:
+                clf_bm_inst = BatchManager(self.X_c.shape[0], clf_batch_size)
+
+            """
+            Epoch train iteration
+            """
+
+            for j, ind in enumerate(bm_inst):
+                batch = self.X[ind]
+                batch = batch.reshape(np.size(ind), self.n_input)
+
+                # self.batch_size: minibatch_size}
+                feed_dict = {self.x: batch, }
+                if self.scale_kl:
+                    feed_dict[self.kl_scale] = np.array([i/epochs, ])
+
+                results = sess.run(self.fetches, feed_dict)
+                Lx, Lz, _, _, _, = results
+
+                Lxs.append(Lx)
+                Lzs.append(Lz)
+
+                if self.train_classifier:
+                    if (j % train_interval) == 0:
+
+                        batch_ind = next(clf_bm_inst)
+                        #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
+                        clf_batch = self.X_c[batch_ind]
+                        clf_batch = clf_batch.reshape(
+                            np.size(batch_ind), self.n_input)
+
+                        t_batch = self.Y_c[batch_ind]
+
+                        # self.batch_size: minibatch_size}
+                        clf_feed_dict = {self.x: clf_batch,
+                                         self.y_batch: t_batch, }
+                        clf_cost, _ = sess.run(
+                            self.clf_fetches, clf_feed_dict, options=run_opts)
+                        logloss_train.append(clf_cost)
+
+            if self.scale_kl:
+                all_lz[i] = np.average(Lzs)
+            else:
+                all_lz[i] = np.average(Lzs)
+
+            all_lx[i] = tf.reduce_mean(Lxs).eval()
+
+            """Compute classifier performance """
+
+            if self.train_classifier:
+
+                all_clf_loss[i] = tf.reduce_mean(logloss_train).eval()
+
+                train_tup = (self.X_c, self.Y_c)
+                test_tup = (self.X_c_test, self.Y_c_test)
+                scores = [0, 0]
+
+                for k, tup in enumerate([train_tup, test_tup]):
+
+                    score = 0
+                    clf_batch = 100
+                    X, Y = tup
+                    tot = X.shape[0]
+                    clf_bm = BatchManager(tot, clf_batch)
+
+                    for bi in clf_bm:
+                        n_bi = bi.shape[0]
+                        to_pred = X[bi].reshape((n_bi, self.n_input))
+                        targets = Y[bi]
+
+                        tmp = np.array(self.score(
+                            sess,
+                            to_pred,
+                            targets,
+                            metric=f1_score,
+                            metric_kwds={"average": None, "labels": [0, 1, 2]}))
+                        score += (n_bi/tot) * tmp
+
+                    scores[k] = score
+
+                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
+                        train score {}  | test score {}".format(
+                    i,
+                    all_lx[i],
+                    all_lz[i],
+                    all_clf_loss[i],
+                    scores[0],
+                    scores[1]
+                ),
+                )
+            else:
+                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
+                    i,
+                    all_lx[i],
+                    all_lz[i]
+                ),
+                    end="",
+                )
+
+            """
+            if all_lz[i] < 0:
+                print("broken training")
+                print("Lx = ", all_lx[i])
+                print("Lz = ", all_lz[i])
+                break
+            """
+
+            if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
+                break
+
+            if i >= n_mvavg:
+                to_average[ta_which] = tf.reduce_mean(
+                    tf.reduce_sum(all_lx[i - n_mvavg: i] + all_lz[i - n_mvavg: i])).eval()
+                ta_which += 1
+
+            if (1 + i) % n_mvavg == 0 and i >= n_mvavg:
+                ta_which = 0
+
+                mvavg_index = i // n_mvavg
+                moving_average[mvavg_index] = tf.reduce_mean(to_average).eval()
+
+                if earlystopping:
+                    do_earlystop = (i // n_mvavg) > 1
+
+                    if moving_average[mvavg_index - 1] < moving_average[mvavg_index] and do_earlystop:
+                        print("Earlystopping")
+
+                        return all_lx, all_lz
+
+                to_average = [0] * n_mvavg
+
+                if save_checkpoints:
+                    self.storeResult(sess, feed_dict, data_dir, model_dir, i)
+
+        return all_lx, all_lz
 
     def compile_model(
             self,
