@@ -303,10 +303,10 @@ class DRAW(LatentModel):
 
                 y1 = norm1.sample((n, self.latent_dim))
                 y2 = norm2.sample((n, self.latent_dim))
-                y3 = norm3.sample((n, self.latent_dim))
+                #y3 = norm3.sample((n, self.latent_dim))
 
                 w = binom.sample((n, self.latent_dim))
-                ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 + w[:, :, 2]*y3
+                ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 #+ w[:, :, 2]*y3
 
                 #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
                 mmd = self.compute_mmd(ref, z)

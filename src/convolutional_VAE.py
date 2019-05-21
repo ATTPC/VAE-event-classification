@@ -34,6 +34,8 @@ class ConVae(LatentModel):
         tf.reset_default_graph()
 
         super().__init__(X, latent_dim, beta, mode_config)
+        self.use_attention = False
+        self.T = 1
 
         self.n_layers = n_layers
 
@@ -63,7 +65,8 @@ class ConVae(LatentModel):
         """
 
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
-        self.x_img = tf.reshape(self.x, (tf.shape(self.x)[0], self.H, self.W, self.ch))
+        self.batch_size = tf.shape(self.x)[0]
+        self.x_img = tf.reshape(self.x, (self.batch_size, self.H, self.W, self.ch))
         h1 = self.x_img
         shape = K.int_shape(h1)
 
@@ -87,7 +90,7 @@ class ConVae(LatentModel):
                     )(h1)
 
         shape = K.int_shape(h1)
-        h1 = tf.reshape(h1, (tf.shape(self.x)[0], shape[1]*shape[2]*shape[3]))
+        h1 = tf.reshape(h1, (self.batch_size, shape[1]*shape[2]*shape[3]))
 
         h1 = Dense(self.sampling_dim, activation='relu')(h1)
 
@@ -112,7 +115,7 @@ class ConVae(LatentModel):
                 shape[1] * shape[2] * shape[3],
                 activation='relu')(sample)
 
-        de1 = tf.reshape(de1, (tf.shape(self.x)[0], shape[1], shape[2], shape[3]))
+        de1 = tf.reshape(de1, (self.batch_size, shape[1], shape[2], shape[3]))
 
         for i in reversed(range(self.n_layers)):
             filters = self.filter_arcitecture[i]
@@ -144,9 +147,10 @@ class ConVae(LatentModel):
         decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
         print("LOOK HERE FUCKO", decoder_out.get_shape())
 
-        decoder_out = tf.reshape(decoder_out, (tf.shape(self.x)[0], self.n_input), )
+        decoder_out = tf.reshape(decoder_out, (self.batch_size, self.n_input), )
 
         self.output = decoder_out
+        self.canvas_seq = [decoder_out, ]
 
         #self.decoder = Model(latent_inputs, decoder_out, name="decoder")
 
@@ -169,17 +173,37 @@ class ConVae(LatentModel):
 
         if self.include_KL:
             mu_sq = tf.square(self.mean)
-            sigma_sq = tf.square(self.var)
-            logsigma_sq = tf.square(tf.log(self.var))
-            KL_loss = tf.reduce_sum(mu_sq + sigma_sq - 2*logsigma_sq, 1)
-
-            KL = self.beta * 0.5 * KL_loss
+            sigma_exp = tf.exp(self.var)
+            #logsigma_sq = tf.square(tf.log1p(self.var))
+            KL_loss = tf.reduce_sum(mu_sq + sigma_exp - self.var - 1, 1)
+            KL = self.beta * 0.5 * tf.reduce_sum(KL_loss)
             self.Lz = KL
+
+        if self.include_MMD:
+                z = self.z_seq[0]
+                n = self.batch_size
+
+                norm1 = tf.distributions.Normal(0., 1.)
+                norm2 = tf.distributions.Normal(6., 1.)
+                binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
+
+                y1 = norm1.sample((n, self.latent_dim))
+                y2 = norm2.sample((n, self.latent_dim))
+                #y3 = norm3.sample((n, self.latent_dim))
+
+                w = binom.sample((n, self.latent_dim))
+                ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 #+ w[:, :, 2]*y3
+
+                #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+                mmd = self.compute_mmd(ref, z)
+                self.Lz = self.beta*mmd
+
+        else:
+            self.Lz = self.Lx*0
 
         self.cost = self.Lx + self.Lz
         self.scale_kl = scale_kl
 
-        
     def kl_loss(self, args):
         mean, var = args
         kl_loss = - 0.5 * K.sum(1 + self.var - K.square(self.mean) - K.exp(self.var), axis=-1)
@@ -200,8 +224,6 @@ class ConVae(LatentModel):
         # by default, random_normal has mean=0 and std=1.0
         epsilon = K.random_normal(shape=(batch, dim))
         return z_mean + K.exp(0.5 * z_log_var) * epsilon
-
-
 
 if __name__ == "__main__":
 
