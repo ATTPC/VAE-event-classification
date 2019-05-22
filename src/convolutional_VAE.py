@@ -26,8 +26,9 @@ class ConVae(LatentModel):
             X,
             beta=1,
             mode_config=None,
+            clustering_config=None,
             sampling_dim=100,
-
+            labelled_data=None,
             train_classifier=False,
             ):
 
@@ -37,11 +38,19 @@ class ConVae(LatentModel):
         self.use_attention = False
         self.T = 1
 
+        self.labelled_data = labelled_data
+
         self.n_layers = n_layers
 
         self.filter_arcitecture = filter_arcitecture
         self.kernel_architecture = kernel_architecture
         self.strides_architecture = strides_architecture
+
+        if self.include_KM and clustering_config == None:
+            raise RuntimeError("when KM is true a config must be supplied")
+        elif self.include_KM and clustering_config != None:
+            for key, val in clustering_config.items():
+                setattr(self, key, val)
 
         self.latent_dim = latent_dim
         self.sampling_dim = sampling_dim
@@ -105,6 +114,11 @@ class ConVae(LatentModel):
                         )
         else:
             sample = Dense(self.latent_dim)(h1)
+
+        if self.include_KM:
+            self.q = self.clustering_layer(sample)
+
+        print("Q SHAP ", self.q.get_shape())
 
         self.z_seq = [sample,]
         self.dec_state_seq = []
@@ -182,23 +196,27 @@ class ConVae(LatentModel):
             self.Lz = KL
 
         if self.include_MMD:
-                z = self.z_seq[0]
-                n = self.batch_size
+            z = self.z_seq[0]
+            n = self.batch_size
 
-                norm1 = tf.distributions.Normal(0., 1.)
-                norm2 = tf.distributions.Normal(6., 1.)
-                binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
+            norm1 = tf.distributions.Normal(0., 1.)
+            norm2 = tf.distributions.Normal(6., 1.)
+            binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
 
-                y1 = norm1.sample((n, self.latent_dim))
-                y2 = norm2.sample((n, self.latent_dim))
-                #y3 = norm3.sample((n, self.latent_dim))
+            y1 = norm1.sample((n, self.latent_dim))
+            y2 = norm2.sample((n, self.latent_dim))
+            #y3 = norm3.sample((n, self.latent_dim))
 
-                w = binom.sample((n, self.latent_dim))
-                ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 #+ w[:, :, 2]*y3
+            w = binom.sample((n, self.latent_dim))
+            ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 #+ w[:, :, 2]*y3
 
-                #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
-                mmd = self.compute_mmd(ref, z)
-                self.Lz = self.beta*mmd
+            #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+            mmd = self.compute_mmd(ref, z)
+            self.Lz = self.beta*mmd
+
+        if self.include_KM:
+            self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
+            self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
 
         else:
             self.Lz = self.Lx*0
