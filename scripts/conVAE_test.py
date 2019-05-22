@@ -71,11 +71,11 @@ train_test = np.concatenate((train_data, test_data))
 
 n_layers = 4 
 filter_architecture = [20, 80, 30, 5]
-kernel_arcitecture = [7, 5, 3, 2]
+kernel_arcitecture = [2, 3, 3, 2]
 strides_architecture = [1, 2, 1, 1]
 epochs = 25
 
-latent_dim = 600
+latent_dim = 300
 batch_size = 100
 
 mode_config = {
@@ -92,7 +92,7 @@ cvae = ConVae(
         strides_architecture,
         latent_dim,
         X,
-        beta=1000,
+        beta=10000,
         mode_config=mode_config
         )
 
