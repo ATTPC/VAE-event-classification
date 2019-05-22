@@ -121,6 +121,8 @@ class ConVae(LatentModel):
             filters = self.filter_arcitecture[i]
             kernel_size = self.kernel_architecture[i]
             strides = self.strides_architecture[i]
+            activation = activation if i != 0 else None
+            print("HERE", i, activation)
 
             de1 = Conv2DTranspose(
                                 filters=filters,
@@ -144,7 +146,7 @@ class ConVae(LatentModel):
                                 bias_regularizer=b_reg,
                                 name='decoder_output')(de1)
 
-        decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
+        #decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
         print("LOOK HERE FUCKO", decoder_out.get_shape())
 
         decoder_out = tf.reshape(decoder_out, (self.batch_size, self.n_input), )
