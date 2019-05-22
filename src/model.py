@@ -4,10 +4,10 @@ import numpy as np
 import sys
 
 from keras import backend as K
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, adjusted_rand_score
 
 from batchmanager import BatchManager
-
+from sklearn.cluster import MiniBatchKMeans
 
 class LatentModel:
 
@@ -48,6 +48,74 @@ class LatentModel:
 
         self.compiled = False
         self.grad_op = False
+
+    def linear(
+        self,
+        x,
+        output_dim,
+        regularizer=tf.contrib.layers.l2_regularizer,
+        lmbd=0.1,
+    ):
+
+        w = tf.get_variable("w", [x.get_shape()[1], output_dim],
+                            regularizer=regularizer(lmbd),
+                            )
+
+        b = tf.get_variable(
+            "b",
+            [output_dim],
+            initializer=tf.constant_initializer(0.0),
+            regularizer=regularizer(lmbd))
+
+        return tf.matmul(x, w) + b
+
+    def clustering_layer(self, inputs):
+        tmp = tf.square( tf.expand_dims(inputs, axis=1) - self.clusters)
+        print("TMP", tmp.get_shape())
+        q = 1.0 / (1.0 + (tf.reduce_sum(
+                                tmp,
+                                axis=2) / self.alpha))
+        q **= (self.alpha + 1.0) / 2.0
+        q = tf.transpose(tf.transpose(q) / tf.reduce_sum(q, axis=1))
+        return q
+
+    def pretrain(
+            self,
+            sess,
+            epochs,
+            minibatch_size,
+            ):
+
+        print("Pretraining .....")
+        for i in range(epochs):
+            bm = BatchManager(self.X.shape[0], minibatch_size)
+            lxs = []
+            for bi in bm:
+                feed_dict = {self.x: self.X[bi]}
+                lxs.append(sess.run(self.Lx, feed_dict))
+            print("Lx: ", np.average(lxs))
+
+    def run_large(
+            self,
+            sess,
+            to_run,
+            data,
+            input_tensor=self.x,
+            batch_size=100,
+            ):
+
+        to_shape = list(to_run.get_shape())
+        to_shape[0] = data.shape[0]
+        ret_array = np.empty(to_shape)
+        bm = BatchManager(data.shape[0], batch_size)
+
+        for bi in bm:
+            n_bi = bi.shape[0]
+            feed_dict = {input_tensor:data[bi].reshape((n_bi, self.n_input))}
+            ret_array[bi] = sess.run(to_run, feed_dict)
+
+        return ret_array
+
 
     def train(
             self,
@@ -93,6 +161,28 @@ class LatentModel:
             clf_batch_size = self.X_c.shape[0]//(train_iters//train_interval)
             all_clf_loss = np.zeros(epochs)
 
+        if self.include_KM:
+            update_interval = 10
+            self.pretrain(sess, 10, minibatch_size)
+
+            print("Training K-means..... ")
+            km = MiniBatchKMeans(
+                        n_clusters=self.n_clusters,
+                        n_init=20,
+                        batch_size=150,
+                        reassignment_ratio=0.5,
+                        max_iter=1000
+                        )
+
+            km.fit(self.run_large(sess, self.sample, self.X, ))
+            self.clusters = tf.Variable(km.cluster_centers_)
+
+            if self.labelled_data != None:
+                x_label = self.labelled_data[0]
+                n_x = x_label.shape[0]
+                x_label = np.reshape(x_label, (n_x, self.n_input))
+                targets = self.labelled_data[1]
+
         for i in range(epochs):
             if self.restore_mode:
                 self.saver.restore(sess, checkpoint_fn)
@@ -108,6 +198,32 @@ class LatentModel:
                 clf_bm_inst = BatchManager(self.X_c.shape[0], clf_batch_size)
 
             """
+            Update target distribution and check cluster performance
+            """
+            if self.include_KM:
+                if (i % update_interval) == 0:
+                    tot_samp = self.X.shape[0]
+                    q = np.empty(tot_samp, self.n_clusters)
+                    clst_bm = BatchManager(tot_samp, 100)
+
+                    for bi in clst_bm:
+                        n_bi = bi.shape[0]
+                        to_pred = self.X[bi].reshape((n_bi, self.n_input))
+                        feed_dict = {self.x: to_pred}
+                        q[bi] = sess.run(self.q, feed_dict)
+
+                    self.p = self.t_distribution(q)
+                    if self.labelled_data != None:
+                        q_label = sess.run(self.q, {self.x: x_label})
+                        y_pred = q_label.argmax(1)
+                        
+                        print( ) 
+                        print("Confusion matrix: " )
+                        print(confusion_matrix(targets, y_pred))
+                        print("Rand score: ")
+                        print(adjusted_rand_score(targets, y_pred))
+
+            """
             Epoch train iteration
             """
 
@@ -119,6 +235,8 @@ class LatentModel:
                 feed_dict = {self.x: batch, }
                 if self.scale_kl:
                     feed_dict[self.kl_scale] = np.array([i/epochs, ])
+                if self.include_KM:
+                    feed_dict[self.p] = self.p_f[ind]
 
                 results = sess.run(self.fetches, feed_dict)
                 Lx, Lz, _, _, _, = results
@@ -189,8 +307,9 @@ class LatentModel:
                     all_clf_loss[i],
                     scores[0],
                     scores[1]
-                ),
+                    ),
                 )
+
             else:
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
                     i,
@@ -348,6 +467,10 @@ class LatentModel:
     def binary_crossentropy(self, t, o):
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
+    def t_distribution(self, q):
+        w = q**2 / q.sum(0)
+        return (w.T / w.sum(1)).T
+
     def compute_kernel(self, x, y):
         """
         Copied from Shengjia Zhao:
@@ -421,25 +544,6 @@ class LatentModel:
             ".npy" if self.simulated_mode else data_dir+"/references"+epoch+".npy"
         np.save(ref_fn, references)
 
-    def linear(
-        self,
-        x,
-        output_dim,
-        regularizer=tf.contrib.layers.l2_regularizer,
-        lmbd=0.1,
-    ):
-
-        w = tf.get_variable("w", [x.get_shape()[1], output_dim],
-                            regularizer=regularizer(lmbd),
-                            )
-
-        b = tf.get_variable(
-            "b",
-            [output_dim],
-            initializer=tf.constant_initializer(0.0),
-            regularizer=regularizer(lmbd))
-
-        return tf.matmul(x, w) + b
 
     def generate_latent(self, sess, save_dir, X_tup, save=True):
         """
