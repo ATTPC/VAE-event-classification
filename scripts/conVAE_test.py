@@ -20,6 +20,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from keras.datasets import mnist
+
+
 print("PID: ", os.getpid())
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
@@ -57,8 +60,13 @@ def compute_accuracy(X, y, Xtest, ytest):
 
 
 # Training dat
-X = np.load("../data/processed/all_0130.npy")
+#X = np.load("../data/processed/all_0130.npy")
 
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+x_train = np.expand_dims(x_train, -1)
+x_test= np.expand_dims(x_test, -1)
+
+"""
 #Labelled data for testing
 with h5py.File("../data/images.h5", "r") as fo:
     train_targets = np.array(fo["train_targets"])
@@ -68,8 +76,9 @@ train_data = np.load("../data/processed/train.npy")
 test_data = np.load("../data/processed/test.npy")
 
 train_test = np.concatenate((train_data, test_data))
+"""
 
-n_layers = 4 
+n_layers = 4
 filter_architecture = [20, 80, 30, 5]
 kernel_arcitecture = [2, 3, 3, 2]
 strides_architecture = [1, 2, 1, 1]
@@ -82,7 +91,13 @@ mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
-        "include_MMD": True,
+        "include_MMD": False,
+        "include_KM": True
+        }
+
+clustering_config = {
+        "n_clusters":10,
+        "alpha":1,
         }
 
 cvae = ConVae(
@@ -95,6 +110,11 @@ cvae = ConVae(
         beta=10000,
         mode_config=mode_config
         )
+
+cvae.p_f = np.random.normal(size=(x_train.shape[0], 10, ))
+
+with tf.variable_scope("clusters"):
+    cvae.clusters = tf.Variable(np.random.normal(size=(10, latent_dim)).astype(np.float32))
 
 cvae.compile_model()
 
@@ -116,6 +136,8 @@ lx, lz = cvae.train(
         earlystopping=False,
         )
 
+
+sys.exit()
 cvae.X = train_data
 cvae.generate_latent(sess, "../drawing", (train_data, test_data))
 
