@@ -71,7 +71,6 @@ class LatentModel:
 
     def clustering_layer(self, inputs):
         tmp = tf.square( tf.expand_dims(inputs, axis=1) - self.clusters)
-        print("TMP", tmp.get_shape())
         q = 1.0 / (1.0 + (tf.reduce_sum(
                                 tmp,
                                 axis=2) / self.alpha))
@@ -87,26 +86,57 @@ class LatentModel:
             ):
 
         print("Pretraining .....")
+        self.be_patient = False
+        self.prev_loss = 0
+        lz_proxy = np.ones(epochs)
+        all_lx = np.zeros(epochs)
+        smooth_loss = np.zeros(epochs)
+        #writer = tf.summary.FileWriter("../loss_records/tensorboard/pretrain", sess.graph) 
         for i in range(epochs):
             bm = BatchManager(self.X.shape[0], minibatch_size)
             lxs = []
             for bi in bm:
-                feed_dict = {self.x: self.X[bi]}
-                lxs.append(sess.run(self.Lx, feed_dict))
-            print("Lx: ", np.average(lxs))
+                n_bi = bi.shape[0]
+                to_run = self.X[bi].reshape((n_bi, self.n_input))
+                feed_dict = {self.x: to_run}
+                lx, _ = sess.run(self.pretrain_fetch, feed_dict)
+                lxs.append(lx)
+            
+            cur_lx = np.average(lxs)
+            all_lx[i] = cur_lx
+            print("Lx: {}".format(i),  np.average(lxs))
+
+            if (i % 10 == 0):
+                self.storeResult(sess, feed_dict, "../drawing", "../models", i)
+                """
+                summary = sess.run([self.merged,], feed_dict=feed_dict) 
+                writer.write_summary(summary, i)
+                """
+            to_earlystop = self.earlystopping(
+                                smooth_loss,
+                                all_lx,
+                                lz_proxy, 
+                                i
+                                )
+            if to_earlystop:
+                return
+
 
     def run_large(
             self,
             sess,
             to_run,
             data,
-            input_tensor=self.x,
+            input_tensor=None,
             batch_size=100,
             ):
 
+        if input_tensor == None:
+            input_tensor = self.x
+
         to_shape = list(to_run.get_shape())
         to_shape[0] = data.shape[0]
-        ret_array = np.empty(to_shape)
+        ret_array = np.zeros(to_shape)
         bm = BatchManager(data.shape[0], batch_size)
 
         for bi in bm:
@@ -127,6 +157,7 @@ class LatentModel:
             save_checkpoints=True,
             earlystopping=True,
             checkpoint_fn=None,
+            run=0,
     ):
         """
         Paramters
@@ -140,6 +171,13 @@ class LatentModel:
             return
 
         K.set_session(sess)
+        self.merged = tf.summary.merge_all()
+        writer = tf.summary.FileWriter(
+                "../loss_records/tensorboard/run_{}".format(run),
+                sess.graph)
+
+        self.performance = tf.placeholder(tf.float32, shape=(), name="score")
+        tf.summary.scalar("performance", self.performance)
 
         self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
@@ -149,12 +187,12 @@ class LatentModel:
         run_opts = tf.RunOptions(report_tensor_allocations_upon_oom=True)
 
         train_iters = self.data_shape[0] // minibatch_size
-        n_mvavg = 5
-        moving_average = [0] * (epochs // n_mvavg)
-        to_average = [0]*n_mvavg
-        ta_which = 0
         all_lx = np.zeros(epochs)
         all_lz = np.zeros(epochs)
+        smooth_loss = np.zeros(epochs)
+
+        log_every = 9
+        self.be_patient=False
 
         if self.train_classifier:
             train_interval = 10
@@ -162,27 +200,10 @@ class LatentModel:
             all_clf_loss = np.zeros(epochs)
 
         if self.include_KM:
-            update_interval = 10
-            self.pretrain(sess, 10, minibatch_size)
+            update_interval = 140
+            self.pretrain_clustering(sess, minibatch_size)
 
-            print("Training K-means..... ")
-            km = MiniBatchKMeans(
-                        n_clusters=self.n_clusters,
-                        n_init=20,
-                        batch_size=150,
-                        reassignment_ratio=0.5,
-                        max_iter=1000
-                        )
-
-            km.fit(self.run_large(sess, self.sample, self.X, ))
-            self.clusters = tf.Variable(km.cluster_centers_)
-
-            if self.labelled_data != None:
-                x_label = self.labelled_data[0]
-                n_x = x_label.shape[0]
-                x_label = np.reshape(x_label, (n_x, self.n_input))
-                targets = self.labelled_data[1]
-
+        print("starting training..")
         for i in range(epochs):
             if self.restore_mode:
                 self.saver.restore(sess, checkpoint_fn)
@@ -202,26 +223,15 @@ class LatentModel:
             """
             if self.include_KM:
                 if (i % update_interval) == 0:
-                    tot_samp = self.X.shape[0]
-                    q = np.empty(tot_samp, self.n_clusters)
-                    clst_bm = BatchManager(tot_samp, 100)
+                    to_break = self.update_clusters(
+                            i, 
+                            sess,
+                            data_dir,
+                            model_dir,
+                            )
 
-                    for bi in clst_bm:
-                        n_bi = bi.shape[0]
-                        to_pred = self.X[bi].reshape((n_bi, self.n_input))
-                        feed_dict = {self.x: to_pred}
-                        q[bi] = sess.run(self.q, feed_dict)
-
-                    self.p = self.t_distribution(q)
-                    if self.labelled_data != None:
-                        q_label = sess.run(self.q, {self.x: x_label})
-                        y_pred = q_label.argmax(1)
-                        
-                        print( ) 
-                        print("Confusion matrix: " )
-                        print(confusion_matrix(targets, y_pred))
-                        print("Rand score: ")
-                        print(adjusted_rand_score(targets, y_pred))
+                    if to_break:
+                        break
 
             """
             Epoch train iteration
@@ -236,7 +246,7 @@ class LatentModel:
                 if self.scale_kl:
                     feed_dict[self.kl_scale] = np.array([i/epochs, ])
                 if self.include_KM:
-                    feed_dict[self.p] = self.p_f[ind]
+                    feed_dict[self.p] = self.P[ind]
 
                 results = sess.run(self.fetches, feed_dict)
                 Lx, Lz, _, _, _, = results
@@ -246,59 +256,22 @@ class LatentModel:
 
                 if self.train_classifier:
                     if (j % train_interval) == 0:
+                        batch_loss = self.train_classifier(sess, clf_bm_inst, run_opts)
+                        logloss_train.append(batch_loss)
 
-                        batch_ind = next(clf_bm_inst)
-                        #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
-                        clf_batch = self.X_c[batch_ind]
-                        clf_batch = clf_batch.reshape(
-                            np.size(batch_ind), self.n_input)
+            try:
+                Lzs = np.array(Lzs)
+                tmp = np.average(Lzs)
+                all_lz[i] = tmp
+            except ValueError:
+                all_lz[i] = 1e5
 
-                        t_batch = self.Y_c[batch_ind]
-
-                        # self.batch_size: minibatch_size}
-                        clf_feed_dict = {self.x: clf_batch,
-                                         self.y_batch: t_batch, }
-                        clf_cost, _ = sess.run(
-                            self.clf_fetches, clf_feed_dict, options=run_opts)
-                        logloss_train.append(clf_cost)
-
-            tmp = np.average(Lzs)
-            all_lz[i] = tmp
             all_lx[i] = tf.reduce_mean(Lxs).eval()
 
             """Compute classifier performance """
 
             if self.train_classifier:
-
-                all_clf_loss[i] = tf.reduce_mean(logloss_train).eval()
-
-                train_tup = (self.X_c, self.Y_c)
-                test_tup = (self.X_c_test, self.Y_c_test)
-                scores = [0, 0]
-
-                for k, tup in enumerate([train_tup, test_tup]):
-
-                    score = 0
-                    clf_batch = 100
-                    X, Y = tup
-                    tot = X.shape[0]
-                    clf_bm = BatchManager(tot, clf_batch)
-
-                    for bi in clf_bm:
-                        n_bi = bi.shape[0]
-                        to_pred = X[bi].reshape((n_bi, self.n_input))
-                        targets = Y[bi]
-
-                        tmp = np.array(self.score(
-                            sess,
-                            to_pred,
-                            targets,
-                            metric=f1_score,
-                            metric_kwds={"average": None, "labels": [0, 1, 2]}))
-                        score += (n_bi/tot) * tmp
-
-                    scores[k] = score
-
+                scores = self.evaluate_classifier(sess, all_clf_loss, logloss_train, i)
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
                         train score {}  | test score {}".format(
                     i,
@@ -315,9 +288,9 @@ class LatentModel:
                     i,
                     all_lx[i],
                     all_lz[i]
-                ),
+                    ),
                     end="",
-                )
+                    )
 
             """
             if all_lz[i] < 0:
@@ -328,33 +301,176 @@ class LatentModel:
             """
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
+                print("nan loss value")
                 break
 
-            if i >= n_mvavg:
-                to_average[ta_which] = tf.reduce_mean(
-                    tf.reduce_sum(all_lx[i - n_mvavg: i] + all_lz[i - n_mvavg: i])).eval()
-                ta_which += 1
-
-            if (1 + i) % n_mvavg == 0 and i >= n_mvavg:
-                ta_which = 0
-
-                mvavg_index = i // n_mvavg
-                moving_average[mvavg_index] = tf.reduce_mean(to_average).eval()
+            if (1 + i) % log_every == 0 and i >= 0:
+                "log performance to tensorboard"
+                summary = sess.run(self.merged, feed_dict=feed_dict)
+                writer.add_summary(summary, i)
 
                 if earlystopping:
-                    do_earlystop = (i // n_mvavg) > 1
+                    to_earlystop = self.earlystopping(
+                            smooth_loss,
+                            all_lx,
+                            all_lz,
+                            i)
 
-                    if moving_average[mvavg_index - 1] < moving_average[mvavg_index] and do_earlystop:
-                        print("Earlystopping")
-
-                        return all_lx, all_lz
-
-                to_average = [0] * n_mvavg
+                    if to_earlystop:
+                        break
 
                 if save_checkpoints:
                     self.storeResult(sess, feed_dict, data_dir, model_dir, i)
 
         return all_lx, all_lz
+
+    def earlystopping(self, smooth_loss, all_lx, all_lz, i):
+        earlystop_beta = 0.98
+        patience=5
+        smooth_loss[i] = (1 - earlystop_beta) * np.average([all_lx[i], all_lz[i]])
+        smooth_loss[i] += earlystop_beta*self.prev_loss
+        self.prev_loss = smooth_loss[i]
+
+        retval = 0
+        if i > 10:
+            if smooth_loss[i] > smooth_loss[i-1]:
+                if not self.be_patient:
+                    self.patient_i = i
+                self.be_patient = True
+            if smooth_loss[i] < smooth_loss[i-1]:
+                self.be_patient = False
+
+        if self.be_patient and (i - self.patient_i) == patience: 
+            change = np.diff(smooth_loss[self.patient_i:  i])
+            mean_change = change.mean()
+            if mean_change > 0:
+                retval = 1 
+
+        return retval
+
+    def update_clusters(
+            self,
+            i,
+            sess,
+            data_dir,
+            model_dir
+            ):
+
+        tot_samp = self.X.shape[0]
+        q = np.zeros((tot_samp, self.n_clusters))
+        clst_bm = BatchManager(tot_samp, 100)
+        retval = 0
+
+        for bi in clst_bm:
+            n_bi = bi.shape[0]
+            to_pred = self.X[bi].reshape((n_bi, self.n_input))
+            feed_dict = {self.x: to_pred}
+            q[bi] = sess.run(self.q, feed_dict)
+
+        self.P = self.t_distribution(q)
+        all_pred = q.argmax(1)
+
+        if i == 0:
+            self.y_prev = all_pred
+        else:
+            precent_changed = self.label_change(self.y_prev, all_pred)
+            print()
+            print("precent_changed: ", precent_changed)
+            if precent_changed  < self.delta:
+                self.storeResult(sess, feed_dict, data_dir, model_dir, i)
+                retval = 1
+            self.y_prev = all_pred
+
+        if self.labelled_data != None:
+            y_pred, targets = self.predict_cluster(sess,)
+            print( ) 
+            print("Confusion matrix: " )
+            print(confusion_matrix(targets, y_pred))
+            print("Rand score: ")
+            print(adjusted_rand_score(targets, y_pred))
+
+        return retval
+
+    def predict_cluster(self, sess):
+        x_label = self.labelled_data[0]
+        n_x = x_label.shape[0]
+        x_label = np.reshape(x_label, (n_x, self.n_input))
+        targets = self.labelled_data[1]
+        q_label = self.run_large(sess, self.q, x_label)
+        y_pred = q_label.argmax(1)
+        return y_pred, targets
+
+    def pretrain_clustering(self, sess, minibatch_size):
+        self.pretrain(sess, 300, minibatch_size)
+
+        print("Training K-means..... ")
+        km = MiniBatchKMeans(
+                    n_clusters=self.n_clusters,
+                    n_init=50,
+                    batch_size=150,
+                    reassignment_ratio=0.5,
+                    max_iter=1000
+                    )
+        
+        print("Compute z")
+        z = self.run_large(sess, self.z_seq[0], self.X,)
+        print("Fit k-means")
+        km.fit(z)
+        print("assign clusters")
+        self.clusters.load(km.cluster_centers_, sess)
+
+    def train_classifier(self, sess, clf_bm_inst, run_opts):
+        batch_ind = next(clf_bm_inst)
+        #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
+        clf_batch = self.X_c[batch_ind]
+        clf_batch = clf_batch.reshape(
+            np.size(batch_ind), self.n_input)
+
+        t_batch = self.Y_c[batch_ind]
+
+        # self.batch_size: minibatch_size}
+        clf_feed_dict = {self.x: clf_batch,
+                            self.y_batch: t_batch, }
+        clf_cost, _ = sess.run(
+            self.clf_fetches, clf_feed_dict, options=run_opts)
+        return clf_cost
+
+    def evaluate_classifier(
+            self,
+            sess,
+            all_clf_loss,
+            logloss_train,
+            i
+            ):
+
+        all_clf_loss[i] = tf.reduce_mean(logloss_train).eval()
+        train_tup = (self.X_c, self.Y_c)
+        test_tup = (self.X_c_test, self.Y_c_test)
+        scores = [0, 0]
+
+        for k, tup in enumerate([train_tup, test_tup]):
+
+            score = 0
+            clf_batch = 100
+            X, Y = tup
+            tot = X.shape[0]
+            clf_bm = BatchManager(tot, clf_batch)
+
+            for bi in clf_bm:
+                n_bi = bi.shape[0]
+                to_pred = X[bi].reshape((n_bi, self.n_input))
+                targets = Y[bi]
+
+                tmp = np.array(self.score(
+                    sess,
+                    to_pred,
+                    targets,
+                    metric=f1_score,
+                    metric_kwds={"average": None, "labels": [0, 1, 2]}))
+                score += (n_bi/tot) * tmp
+
+            scores[k] = score
+        return scores
 
     def compile_model(
             self,
@@ -429,6 +545,17 @@ class LatentModel:
             self.train_op
         ])
 
+        if self.include_KM:
+            lx_optimizer = tf.train.AdamOptimizer(0.0001, beta1=0.5)
+            lx_grads = lx_optimizer.compute_gradients(self.Lx)
+
+            for i, (g, v) in enumerate(lx_grads):
+                if g is not None:
+                    lx_grads[i] = (tf.clip_by_norm(g, 5), v)
+
+            lx_train_op = lx_optimizer.apply_gradients(lx_grads)
+            self.pretrain_fetch = [self.Lx, lx_train_op]
+
         if self.train_classifier:
 
             classifier_grads = optimizer.compute_gradients(
@@ -451,6 +578,11 @@ class LatentModel:
         raise NotImplementedError(
             "could not compile pure virtual class LatentModel")
 
+    def label_change(self, a, b):
+        diff = a-b
+        nonzero = np.nonzero(diff)[0]
+        return len(nonzero)/len(a)
+
     def predict(self, sess, X):
         tmp = {self.x: X, }  # self.batch_size: X.shape[0]}
         return np.argmax(sess.run(self.logits, tmp), 1)
@@ -466,6 +598,9 @@ class LatentModel:
 
     def binary_crossentropy(self, t, o):
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
+
+    def mse(self, t, o):
+        return (t -  o)**2
 
     def t_distribution(self, q):
         w = q**2 / q.sum(0)
@@ -543,6 +678,20 @@ class LatentModel:
         ref_fn = data_dir+"/simulated/references"+epoch + \
             ".npy" if self.simulated_mode else data_dir+"/references"+epoch+".npy"
         np.save(ref_fn, references)
+
+    def variable_summary(self, var):
+        """
+        Attach a lot of summaries to a Tensor (for TensorBoard visualization).
+        """
+        with tf.name_scope('summaries'):
+            mean = tf.reduce_mean(var, )
+            tf.summary.scalar('mean', mean)
+            with tf.name_scope('stddev'):
+                stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+            tf.summary.scalar('stddev', stddev)
+            tf.summary.scalar('max', tf.reduce_max(var))
+            tf.summary.scalar('min', tf.reduce_min(var))
+            tf.summary.histogram('histogram', var)
 
 
     def generate_latent(self, sess, save_dir, X_tup, save=True):
