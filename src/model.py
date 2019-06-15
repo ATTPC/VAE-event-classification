@@ -4,7 +4,8 @@ import numpy as np
 import sys
 
 from keras import backend as K
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, adjusted_rand_score
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+from sklearn.metrics import  adjusted_rand_score, normalized_mutual_info_score
 
 from batchmanager import BatchManager
 from sklearn.cluster import MiniBatchKMeans
@@ -104,7 +105,7 @@ class LatentModel:
             
             cur_lx = np.average(lxs)
             all_lx[i] = cur_lx
-            print("Lx: {}".format(i),  np.average(lxs))
+            print("Lx: {}".format(i),  all_lx[i])
 
             if (i % 10 == 0):
                 self.storeResult(sess, feed_dict, "../drawing", "../models", i)
@@ -192,7 +193,6 @@ class LatentModel:
         smooth_loss = np.zeros(epochs)
 
         log_every = 9
-        self.be_patient=False
 
         if self.train_classifier:
             train_interval = 10
@@ -200,7 +200,7 @@ class LatentModel:
             all_clf_loss = np.zeros(epochs)
 
         if self.include_KM:
-            update_interval = 140
+            update_interval = 500
             self.pretrain_clustering(sess, minibatch_size)
 
         print("starting training..")
@@ -212,7 +212,7 @@ class LatentModel:
             Lxs = []
             Lzs = []
             logloss_train = []
-
+            self.be_patient=False
             bm_inst = BatchManager(self.n_data, minibatch_size)
 
             if self.train_classifier:
@@ -223,7 +223,7 @@ class LatentModel:
             """
             if self.include_KM:
                 if (i % update_interval) == 0:
-                    to_break = self.update_clusters(
+                    to_break, performance = self.update_clusters(
                             i, 
                             sess,
                             data_dir,
@@ -306,6 +306,7 @@ class LatentModel:
 
             if (1 + i) % log_every == 0 and i >= 0:
                 "log performance to tensorboard"
+                feed_dict[self.performance] = performance
                 summary = sess.run(self.merged, feed_dict=feed_dict)
                 writer.add_summary(summary, i)
 
@@ -325,7 +326,7 @@ class LatentModel:
         return all_lx, all_lz
 
     def earlystopping(self, smooth_loss, all_lx, all_lz, i):
-        earlystop_beta = 0.98
+        earlystop_beta = 0.95
         patience=5
         smooth_loss[i] = (1 - earlystop_beta) * np.average([all_lx[i], all_lz[i]])
         smooth_loss[i] += earlystop_beta*self.prev_loss
@@ -343,6 +344,11 @@ class LatentModel:
         if self.be_patient and (i - self.patient_i) == patience: 
             change = np.diff(smooth_loss[self.patient_i:  i])
             mean_change = change.mean()
+            print("Earlystopping Mean", mean_change)
+            print("changes", change)
+            print("values", smooth_loss[self.patient_i: i])
+            print("----------")
+            self.be_patient = False
             if mean_change > 0:
                 retval = 1 
 
@@ -383,13 +389,15 @@ class LatentModel:
 
         if self.labelled_data != None:
             y_pred, targets = self.predict_cluster(sess,)
+            ars = adjusted_rand_score(targets, y_pred)
+            nmi = normalized_mutual_info_score(targets, y_pred)
+            performance = ars
             print( ) 
             print("Confusion matrix: " )
             print(confusion_matrix(targets, y_pred))
-            print("Rand score: ")
-            print(adjusted_rand_score(targets, y_pred))
+            print("ARS : {:.3f} ' NMI: {:.3f} ".format(ars, nmi))
 
-        return retval
+        return retval, ars
 
     def predict_cluster(self, sess):
         x_label = self.labelled_data[0]
@@ -401,7 +409,7 @@ class LatentModel:
         return y_pred, targets
 
     def pretrain_clustering(self, sess, minibatch_size):
-        self.pretrain(sess, 300, minibatch_size)
+        self.pretrain(sess, 200, minibatch_size)
 
         print("Training K-means..... ")
         km = MiniBatchKMeans(

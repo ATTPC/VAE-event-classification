@@ -9,6 +9,7 @@ import keras.optimizers as opt
 from model import LatentModel
 
 from tensorflow.keras.layers import Conv2D, Conv2DTranspose, Dense, Lambda, ZeroPadding2D
+from tensorflow.keras.layers import ReLU, LeakyReLU, BatchNormalization
 
 
 class ConVae(LatentModel):
@@ -72,6 +73,12 @@ class ConVae(LatentModel):
         Compiles the model graph with the parameters specified from the model
         initialization 
         """
+        activations = {
+                "relu": ReLU,
+                "lrelu": LeakyReLU,
+                "tanh": tf.tanh,
+                "sigmoid": tf.sigmoid,
+                }
 
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
@@ -83,29 +90,58 @@ class ConVae(LatentModel):
         b_reg = bias_reg(bias_reg_strenght)
 
         for i in range(self.n_layers):
-            filters = self.filter_arcitecture[i]
-            kernel_size = self.kernel_architecture[i]
-            strides = self.strides_architecture[i]
+            with tf.name_scope("conv_"+str(i)):
+                filters = self.filter_arcitecture[i]
+                kernel_size = self.kernel_architecture[i]
+                strides = self.strides_architecture[i]
 
-            h1 = Conv2D(
-                    filters,
-                    kernel_size,
-                    activation=activation,
-                    strides=strides,
-                    padding="valid",
-                    use_bias=True,
-                    kernel_regularizer=k_reg,
-                    bias_regularizer=b_reg
-                    )(h1)
+                h1 = Conv2D(
+                        filters,
+                        kernel_size,
+                        strides=strides,
+                        padding="valid",
+                        use_bias=True,
+                        kernel_regularizer=k_reg,
+                        bias_regularizer=b_reg
+                        )(h1)
+
+                if i == 0:
+                    continue
+                if activation=="relu" or activation=="lrelu":
+                    a = activations[activation]
+                    if activation == "relu":
+                        h1 = a()(h1)
+                    else: 
+                        h1 = a(0.1)(h1)
+                    with tf.name_scope("batch_norm"):
+                        h1 = BatchNormalization(
+                                axis=-1,
+                                center=True,
+                                scale=True,
+                                epsilon=1e-4,
+                                )(h1)
+                        self.varaible_summary(h1)
+
+                else:
+                    a = activations[activation]
+                    with tf.name_scope("batch_norm"):
+                        h1 = BatchNormalization(
+                                axis=-1,
+                                center=True,
+                                scale=True,
+                                epsilon=1e-4,
+                                )(h1)
+                        self.variable_summary(h1)
+                    h1 = a(h1)
 
         shape = K.int_shape(h1)
+        print("Conv output shape", shape)
         h1 = tf.reshape(h1, (self.batch_size, shape[1]*shape[2]*shape[3]))
-
-        h1 = Dense(self.sampling_dim, activation='relu')(h1)
+        h1 = Dense(self.sampling_dim, activation=activation)(h1)
 
         if self.include_KL:
             self.mean = Dense(self.latent_dim)(h1)
-            self.var = Dense(self.latent_dim, activation="relu")(h1)
+            self.var = Dense(self.latent_dim, activation=activation)(h1)
 
             sample = Lambda(
                         self.sampling,
@@ -113,9 +149,18 @@ class ConVae(LatentModel):
                         name="sampler")([self.mean, self.var]
                         )
         else:
-            sample = Dense(self.latent_dim)(h1)
+            sample = Dense(
+                    self.latent_dim,
+                    activation=activation,
+                    )(h1)
 
         if self.include_KM:
+            self.clusters = tf.get_variable(
+                                    "clusters",
+                                    shape=(self.n_clusters, self.latent_dim) ,
+                                    initializer=tf.initializers.random_uniform()
+                                    )
+
             self.q = self.clustering_layer(sample)
 
         print("Q SHAP ", self.q.get_shape())
@@ -127,33 +172,66 @@ class ConVae(LatentModel):
         # %%
         de1 = Dense(
                 shape[1] * shape[2] * shape[3],
-                activation='relu')(sample)
+                activation=activation)(sample)
+
+        with tf.name_scope("dense"):
+            de1 = BatchNormalization()(de1)
+            self.variable_summary(de1)
 
         de1 = tf.reshape(de1, (self.batch_size, shape[1], shape[2], shape[3]))
 
         for i in reversed(range(self.n_layers)):
-            filters = self.filter_arcitecture[i]
-            kernel_size = self.kernel_architecture[i]
-            strides = self.strides_architecture[i]
-            activation = activation if i != 0 else None
-            print("HERE", i, activation)
+            with tf.name_scope("t_conv_"+str(i)):
+                filters = self.filter_arcitecture[i]
+                kernel_size = self.kernel_architecture[i]
+                strides = self.strides_architecture[i]
+                #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
 
-            de1 = Conv2DTranspose(
-                                filters=filters,
-                                kernel_size=kernel_size,
-                                activation=activation,
-                                strides=strides,
-                                padding="valid",
-                                use_bias=True,
-                                kernel_regularizer=k_reg,
-                                bias_regularizer=b_reg,
-                                )(de1)
+                de1 = Conv2DTranspose(
+                                    filters=filters,
+                                    kernel_size=kernel_size,
+                                    strides=strides,
+                                    padding="valid",
+                                    use_bias=True,
+                                    kernel_regularizer=k_reg,
+                                    bias_regularizer=b_reg,
+                                    )(de1)
 
+                if activation=="relu" or activation=="lrelu":
+                    a = activations[activation]
+                    if activation == "relu":
+                        h1 = a()(h1)
+                    else: 
+                        h1 = a(0.1)(h1)
+
+                    with tf.name_scope("batch_norm"):
+                        h1 = BatchNormalization(
+                                axis=-1,
+                                center=True,
+                                scale=True,
+                                epsilon=1e-4,
+                                beta=0.9
+                                )(h1)
+                        self.variable_summary(h1)
+
+                else:
+                    a = activations[activation]
+                    with tf.name_scope("batch_norm"):
+                        h1 = BatchNormalization(
+                                axis=-1,
+                                center=True,
+                                scale=True,
+                                epsilon=1e-4,
+                                )(h1)
+                        self.variable_summary(h1)
+
+                    h1 = a(h1)
 
         decoder_out = Conv2DTranspose(
                                 filters=1,
                                 kernel_size=2,
                                 activation='sigmoid',
+                                #activation="relu",
                                 padding='same',
                                 use_bias=True,
                                 kernel_regularizer=k_reg,
@@ -179,13 +257,13 @@ class ConVae(LatentModel):
 
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
         x_recons = self.output
-        print(x_recons.get_shape())
 
         if reconst_loss==None:
             reconst_loss = self.binary_crossentropy
-
-        self.Lx = tf.reduce_mean(tf.reduce_sum(
-                                    reconst_loss(self.x, x_recons), 1))
+            self.Lx = tf.reduce_mean(tf.reduce_sum(
+                                        reconst_loss(self.x, x_recons), 1))
+        elif reconst_loss=="mse":
+            self.Lx = tf.losses.mean_squared_error(self.x, x_recons)
 
         if self.include_KL:
             mu_sq = tf.square(self.mean)
@@ -216,15 +294,27 @@ class ConVae(LatentModel):
 
         if self.include_KM:
             self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
-            self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
+            if self.include_MMD:
+                mmd = self.compute_mmd(self.p, self.q)
+                self.Lz = self.beta*mmd
+            else:
+                self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
+                self.Lz = self.beta*tf.reduce_mean(self.Lz)
+                print("lz shape", self.Lz.get_shape())
 
         else:
             self.Lz = self.Lx*0
 
         self.cost = self.Lx + self.Lz
         self.scale_kl = scale_kl
+        tf.summary.scalar("Lx", self.Lx)
+        tf.summary.scalar("Lz", self.Lz)
+        tf.summary.scalar("cost", self.cost)
 
     def kl_loss(self, args):
+        """
+        kl loss to isotropic zero mean unit variance gaussian
+        """
         mean, var = args
         kl_loss = - 0.5 * K.sum(1 + self.var - K.square(self.mean) - K.exp(self.var), axis=-1)
         return tf.reduce_mean(kl_loss, keepdims=True)

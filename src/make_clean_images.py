@@ -16,9 +16,9 @@ point_cutoff = 50
 
 
 def filtering(xyz):
-    filtered_1 = xyz[xyz[:, 6] < 40]
+    filtered_1 = xyz[xyz[:, 6] < 45]
     filtered_2 = filtered_1[(filtered_1[:, 2]*DRIFT_VEL/CLOCK) < 1250.]
-    filtered_3 = filtered_2[filtered_2[:, 5] > 2]
+    filtered_3 = filtered_2[filtered_2[:, 5] > 1]
 
     return filtered_3
 
@@ -127,7 +127,9 @@ def make_images(projection, labeled):
         for i in range(len(normalized_charge_events)):
             events[i][0][:, 3] = normalized_charge_events[i]
 
-        images = np.empty((len(events), 128, 128, 1), dtype=np.uint8)
+        image_size = 80
+
+        images = np.empty((len(events), image_size, image_size, 1), dtype=np.uint8)
         targets = np.empty(len(events), dtype=np.uint8)
 
         def make_image(event):
@@ -145,7 +147,7 @@ def make_images(projection, labeled):
             else:
                 raise ValueError("Invalid projection value.")
 
-            fig = plt.figure(figsize=(1, 1), dpi=128)
+            fig = plt.figure(figsize=(1, 1), dpi=image_size)
             if projection == 'zy':
                 plt.xlim(0.0, 1250.0)
             elif projection == 'xy':
@@ -173,7 +175,11 @@ def make_images(projection, labeled):
             targets[i] = target
 
         print("Saving...")
-        np.save("../data/clean/images/run_{}_label_{}.npy".format(run, labeled), images/255)
+        np.save("../data/clean/images/run_{}_label_{}_size_{}.npy".format(
+                    run,
+                    labeled,
+                    image_size
+                    ), images/255)
 
         if labeled:
             np.save("../data/clean/targets/run_{}_targets.npy".format(run), targets)
