@@ -12,7 +12,8 @@ def DataLoader(file_location):
 
     return X_t, y_t, X_v, y_v
 
+
 if __name__ == "__main__":
 
-    file_location = "/home/solli-comphys/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"
+    file_location = "~/Documents/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"
     a = DataLoader(file_location)
