@@ -35,6 +35,13 @@ class ConVae(LatentModel):
 
         tf.reset_default_graph()
 
+        self.simulated_mode = False
+        self.restore_mode = False
+        self.include_KL = False
+        self.include_MMD = False
+        self.include_KM = False
+        self.pretrain_simulated = False
+
         super().__init__(X, latent_dim, beta, mode_config)
         self.use_attention = False
         self.T = 1
@@ -80,6 +87,13 @@ class ConVae(LatentModel):
                 "sigmoid": tf.sigmoid,
                 }
 
+        keras_activations = {
+                "relu": ker.activations.relu,
+                "lrelu": ker.layers.advanced_activations.LeakyReLU,
+                "tanh": ker.activations.tanh,
+                "sigmoid": ker.activations.sigmoid,
+                }
+
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
         self.x_img = tf.reshape(self.x, (self.batch_size, self.H, self.W, self.ch))
@@ -94,11 +108,10 @@ class ConVae(LatentModel):
                 filters = self.filter_arcitecture[i]
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
-
                 h1 = Conv2D(
                         filters,
-                        kernel_size,
-                        strides=strides,
+                        (kernel_size, kernel_size),
+                        strides=(strides, strides),
                         padding="valid",
                         use_bias=True,
                         kernel_regularizer=k_reg,
@@ -106,6 +119,8 @@ class ConVae(LatentModel):
                         )(h1)
 
                 if i == 0:
+                    continue
+                if activation == None:
                     continue
                 if activation=="relu" or activation=="lrelu":
                     a = activations[activation]
@@ -120,8 +135,7 @@ class ConVae(LatentModel):
                                 scale=True,
                                 epsilon=1e-4,
                                 )(h1)
-                        self.varaible_summary(h1)
-
+                        self.variable_summary(h1)
                 else:
                     a = activations[activation]
                     with tf.name_scope("batch_norm"):
@@ -135,7 +149,7 @@ class ConVae(LatentModel):
                     h1 = a(h1)
 
         shape = K.int_shape(h1)
-        print("Conv output shape", shape)
+        #print("Conv out shape", shape)
         h1 = tf.reshape(h1, (self.batch_size, shape[1]*shape[2]*shape[3]))
         h1 = Dense(self.sampling_dim, activation=activation)(h1)
 
@@ -162,8 +176,7 @@ class ConVae(LatentModel):
                                     )
 
             self.q = self.clustering_layer(sample)
-
-        print("Q SHAP ", self.q.get_shape())
+            print("Q SHAP ", self.q.get_shape())
 
         self.z_seq = [sample,]
         self.dec_state_seq = []
@@ -183,60 +196,78 @@ class ConVae(LatentModel):
         for i in reversed(range(self.n_layers)):
             with tf.name_scope("t_conv_"+str(i)):
                 filters = self.filter_arcitecture[i]
+                if i == 0:
+                    filters = 1
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
                 #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
 
-                de1 = Conv2DTranspose(
+                layer = ker.layers.Conv2DTranspose(
                                     filters=filters,
-                                    kernel_size=kernel_size,
-                                    strides=strides,
+                                    kernel_size=(kernel_size, kernel_size),
+                                    strides=(1, 1),
+                                    output_padding=(0,0),
                                     padding="valid",
                                     use_bias=True,
                                     kernel_regularizer=k_reg,
                                     bias_regularizer=b_reg,
-                                    )(de1)
+                                    )
+                de1 = layer(de1)
 
+                if strides==2:
+                    de1 = ker.layers.UpSampling2D(size=())(de1)
+
+                if i == 0:
+                    with tf.name_scope("batch_norm"):
+                        de1 = ker.layers.BatchNormalization(
+                                axis=-1,
+                                center=True,
+                                scale=True,
+                                epsilon=1e-4,
+                                )(de1)
+                        self.variable_summary(de1)
+                    decoder_out = tf.sigmoid(de1)
+                if activation == None:
+                    continue
                 if activation=="relu" or activation=="lrelu":
-                    a = activations[activation]
+                    a = keras_activations[activation]
                     if activation == "relu":
-                        h1 = a()(h1)
+                        de1 = a(de1)
                     else: 
-                        h1 = a(0.1)(h1)
-
+                        de1 = a(0.1)(de1)
                     with tf.name_scope("batch_norm"):
-                        h1 = BatchNormalization(
+                        de1 = ker.layers.BatchNormalization(
                                 axis=-1,
                                 center=True,
                                 scale=True,
                                 epsilon=1e-4,
-                                beta=0.9
-                                )(h1)
-                        self.variable_summary(h1)
-
+                                )(de1)
+                        self.variable_summary(de1)
                 else:
-                    a = activations[activation]
+                    a = keras_activations[activation]
                     with tf.name_scope("batch_norm"):
-                        h1 = BatchNormalization(
+                        de1 = ker.layers.BatchNormalization(
                                 axis=-1,
                                 center=True,
                                 scale=True,
                                 epsilon=1e-4,
-                                )(h1)
-                        self.variable_summary(h1)
-
-                    h1 = a(h1)
-
-        decoder_out = Conv2DTranspose(
+                                )(de1)
+                        self.variable_summary(de1)
+                    de1 = a(de1)
+            print("DECONV OUT SHAPE", layer.output_shape, i)
+        """
+        decoder_out = ker.layers.Conv2DTranspose(
                                 filters=1,
                                 kernel_size=2,
                                 activation='sigmoid',
+                                output_padding=(0, 0),
                                 #activation="relu",
-                                padding='same',
+                                padding='valid',
                                 use_bias=True,
                                 kernel_regularizer=k_reg,
                                 bias_regularizer=b_reg,
                                 name='decoder_output')(de1)
+        """
 
         #decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
         print("LOOK HERE FUCKO", decoder_out.get_shape())
@@ -264,6 +295,10 @@ class ConVae(LatentModel):
                                         reconst_loss(self.x, x_recons), 1))
         elif reconst_loss=="mse":
             self.Lx = tf.losses.mean_squared_error(self.x, x_recons)
+
+        if self.pretrain_simulated:
+            self.y_batch = tf.placeholder(tf.float32)
+            self.classifier_cost = tf.losses.mean_squared_error(self.z_seq[0], self.y_batch)
 
         if self.include_KL:
             mu_sq = tf.square(self.mean)

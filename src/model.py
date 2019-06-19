@@ -232,6 +232,8 @@ class LatentModel:
 
                     if to_break:
                         break
+            else:
+                performance = np.average([Lxs[-1], Lzs[-1]])
 
             """
             Epoch train iteration
@@ -409,7 +411,11 @@ class LatentModel:
         return y_pred, targets
 
     def pretrain_clustering(self, sess, minibatch_size):
-        self.pretrain(sess, 200, minibatch_size)
+        self.pretrain(sess, 20, minibatch_size)
+
+        if self.pretrain_simulated:
+            print("Simulated pretrain....")
+            self.train_simulated(sess, 20, minibatch_size)
 
         print("Training K-means..... ")
         km = MiniBatchKMeans(
@@ -427,8 +433,19 @@ class LatentModel:
         print("assign clusters")
         self.clusters.load(km.cluster_centers_, sess)
 
-    def train_classifier(self, sess, clf_bm_inst, run_opts):
-        batch_ind = next(clf_bm_inst)
+    def train_simulated(self, sess, epochs, minibatch_size):
+        self.clf_fetches = self.compute_classifier_cost(self.optimizer)
+        all_clf_cost =  []
+
+        for i in range(epochs):
+            clf_bm_inst = BatchManager(self.X_c.shape[0], minibatch_size)
+            for batch_ind in clf_bm_inst:
+                clf_cost = self.run_clf_batch(sess, batch_ind, )
+                all_clf_cost.append(clf_cost)
+
+        return all_clf_cost
+
+    def run_clf_batch(self, sess, batch_ind ):
         #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
         clf_batch = self.X_c[batch_ind]
         clf_batch = clf_batch.reshape(
@@ -440,7 +457,7 @@ class LatentModel:
         clf_feed_dict = {self.x: clf_batch,
                             self.y_batch: t_batch, }
         clf_cost, _ = sess.run(
-            self.clf_fetches, clf_feed_dict, options=run_opts)
+            self.clf_fetches, clf_feed_dict, )
         return clf_cost
 
     def evaluate_classifier(
@@ -536,6 +553,7 @@ class LatentModel:
             return 1
 
         optimizer = optimizer_class(*opt_args, **opt_kwds)
+        self.optimizer = optimizer
         grads = optimizer.compute_gradients(self.cost)
 
         for i, (g, v) in enumerate(grads):
@@ -565,18 +583,22 @@ class LatentModel:
             self.pretrain_fetch = [self.Lx, lx_train_op]
 
         if self.train_classifier:
-
-            classifier_grads = optimizer.compute_gradients(
-                self.classifier_cost)
-
-            for i, (g, v) in enumerate(classifier_grads):
-                if g is not None:
-                    classifier_grads[i] = (tf.clip_by_norm(g, 5), v)
-
-            self.classifier_op = optimizer.apply_gradients(classifier_grads)
-            self.clf_fetches = [self.classifier_cost, self.classifier_op]
+            self.clf_fetches = self.compute_classifier_cost(optimizer)
 
         self.grad_op = True
+
+    def compute_classifier_cost(self, optimizer):
+        classifier_grads = optimizer.compute_gradients(
+            self.classifier_cost)
+
+        for i, (g, v) in enumerate(classifier_grads):
+            if g is not None:
+                classifier_grads[i] = (tf.clip_by_norm(g, 5), v)
+
+        self.classifier_op = optimizer.apply_gradients(classifier_grads)
+        clf_fetches = [self.classifier_cost, self.classifier_op]
+        return clf_fetches
+
 
     def _ModelGraph(self,):
         raise NotImplementedError(
