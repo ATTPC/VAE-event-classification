@@ -61,7 +61,7 @@ def compute_accuracy(X, y, Xtest, ytest):
 
 # Training dat
 #X = np.load("../data/processed/all_0130.npy")
-
+"""
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
 x_train = np.expand_dims(x_train, -1)
 x_test= np.expand_dims(x_test, -1)
@@ -76,7 +76,7 @@ train_data = np.load("../data/processed/train.npy")
 test_data = np.load("../data/processed/test.npy")
 
 train_test = np.concatenate((train_data, test_data))
-"""
+
 
 n_layers = 4
 filter_architecture = [20, 80, 30, 5]
