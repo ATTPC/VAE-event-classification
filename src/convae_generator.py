@@ -1,22 +1,43 @@
 import tensorflow as tf 
 import numpy as np
+
+from sklearn.metrics import  adjusted_rand_score, normalized_mutual_info_score
+from sklearn.preprocessing import OneHotEncoder
+
 from model_generator import ModelGenerator
 from convolutional_VAE import ConVae
 
+import sys
+sys.path.append("../scripts")
+import run
+
 class ConVaeGenerator(ModelGenerator):
-    def __init__(self, X):
+    def __init__(
+            self, 
+            X,
+            n_classes=3,
+            labelled_data=None,
+            clustering=True,
+            architecture="vgg"
+            ):
         super().__init__(ConVae)
-        self.max_layers = 4 
+        self.architecture = architecture
+        self.train_clustering = clustering
+        self.labelled_data = labelled_data
+        self.n_classes = n_classes
+        self.max_layers = 10
         self.latent_types = ["include_KL", "include_MMD", None]
+        self.activations = ["relu", "tanh", "sigmoid", None]
         self.etas = np.logspace(-5, -1, 5)
         self.betas = np.logspace(0, 5, 6)
-        self.ld = [3, 10, 20, 50, 100, 250]
+        self.ld = [3, 10, 20, 50, 100]
+        self.sd = [10, 50, 150]
         self.X = X
 
     def sample_hyperparameters(self,):
         config = []
         n_layers = np.random.randint(
-                        3,
+                        4,
                         self.max_layers
                         )
         valid_conv_out = 1
@@ -26,7 +47,6 @@ class ConVaeGenerator(ModelGenerator):
             valid_conv_out = self.conv_out(conv_config, input_dim)
         parameters_config = self._generate_param_config()
         n_latent_types = len(self.latent_types)
-        latent = self.latent_types[np.random.randint(0, n_latent_types)]
         mode_config = {
                 "simulated_mode": False,
                 "restore_mode": False,
@@ -35,9 +55,14 @@ class ConVaeGenerator(ModelGenerator):
                 "include_KM:": False,
                 }
 
-        if not latent == None:
-            mode_config[latent] = True
-        clustering_config = {}
+        if self.train_clustering:
+            mode_config["include_KM"] = True
+            clustering_config = self._generate_clustering_config()
+        else:
+            latent = self.latent_types[np.random.randint(0, n_latent_types)]
+            if not latent == None:
+                mode_config[latent] = True
+            clustering_config = {}
 
         config.append(conv_config)
         config.append(parameters_config)
@@ -46,36 +71,138 @@ class ConVaeGenerator(ModelGenerator):
         return config
 
     def _generate_param_config(self,):
-        beta = self.betas[np.random.randint(0, len(self.betas)-1)]
-        eta = self.etas[np.random.randint(0, len(self.etas)-1)]
+        beta = self.betas[np.random.randint(0, len(self.betas))]
+        eta = self.etas[np.random.randint(0, len(self.etas))]
         beta1 = np.random.uniform(0.2, 0.96)
         beta2 = 0.99
-        latent_dim = self.ld[np.random.randint(0, len(self.ld)-1)]
+        latent_dim = self.ld[np.random.randint(0, len(self.ld))]
+        sampling_dim = self.sd[np.random.randint(0, len(self.sd))]
         parameters_config = [
                 beta,
                 eta,
                 beta1,
                 beta2,
-                latent_dim
+                latent_dim,
+                sampling_dim,
                 ]
         return parameters_config
 
     def _generate_conv_config(self, n_layers):
-        filter_sizes = np.array([3, 5, 7 ,9, 11])
-        filter_architecture = 2**np.random.randint(1, 8, size=n_layers)
-        which_kernels = np.random.randint(0, len(filter_sizes), size=n_layers)
-        kernel_architecture = filter_sizes[which_kernels]
         strides_arcitecture = [1]*n_layers#np.random.randint(1, 3, size=n_layers)
+        if self.architecture == "vgg":
+            kernel_architecture = [3]*n_layers
+            filter_architecture = self._make_vgg_filters(kernel_architecture)
+            pooling_config = self._make_vgg_pooling_config(n_layers)
+        else:
+            kernel_architecture = self._make_kernel_config(n_layers)
+            pooling_config = self._make_filter_config(n_layers)
+            filter_architecture = self._make_filter_config(kernel_architecture)
+
         conv_config = [
                 filter_architecture,
                 kernel_architecture,
                 strides_arcitecture,
+                pooling_config,
                 n_layers,
                 ]
-
-        print("CONV CONFIG", conv_config)
+        print("POOLING: ", pooling_config)
         return conv_config
     
+    def _make_vgg_filters(self, kernel_architecture):
+        n_layers = len(kernel_architecture)
+        base_filters = 2**np.random.randint(1, 4)
+        filter_architecture = np.array([base_filters]*n_layers)
+        where_double = [2, 4, 7, 10, 13]
+
+        for i in range(n_layers):
+            if i in where_double:
+                filter_architecture[i:] *= 2
+
+        return filter_architecture 
+
+    def _make_pooling_config(self, n_layers):
+        return [0]*n_layers
+
+    def _make_vgg_pooling_config(self, n_layers):
+        pooling_config = [0]*n_layers
+        where_pool = np.array([2, 4, 7, 10, 13])-1
+
+        for i in range(n_layers):
+            if i in where_pool:
+                pooling_config[i] = 1
+
+        return pooling_config 
+
+    def _generate_clustering_config(self, ):
+        clustering_config = {
+                "n_clusters": self.n_classes,
+                "alpha":1,
+                "delta":0.01,
+                }
+        pre_epochs = [50, 100, 200]
+        pretrain_epochs = pre_epochs[np.random.randint(0, len(pre_epochs))]
+        update_freq = [50, 150, 200]
+        update_interval = update_freq[np.random.randint(0, len(update_freq))]
+        pretrain_sim = np.random.randint(0, 2)
+        if self.n_classes == 2:
+            pretrain_sim = 0
+
+        if pretrain_sim:
+            X_sim = np.load("../data/simulated/pr_test_simulated.npy")[0:1000]
+            y_sim = np.load("../data/simulated/test_targets.npy")[0:1000]
+            oh = OneHotEncoder(sparse=False)
+            y_sim = oh.fit_transform(y_sim.reshape(-1, 1))
+            if self.n_classes > len(np.unique(y_sim)):
+                tmp = np.zeros(np.array(y_sim.shape) + [0, 1]) 
+                tmp[:, :-1] = y_sim
+                y_sim = tmp
+            clustering_config["X_c"] = X_sim
+            clustering_config["Y_c"] = y_sim
+
+        clustering_config["pretrain_simulated"] = pretrain_sim
+        clustering_config["pretrain_epochs"] = pretrain_epochs
+        clustering_config["update_interval"] = update_interval
+        return clustering_config
+
+    def _make_filter_config(self, kernel_architecture):
+        n_layers = len(kernel_architecture)
+        filter_architecture = []
+        filter_exp = 5
+        n_filters= 2**np.random.randint(1, filter_exp)
+        k = kernel_architecture[0]
+
+        for i in range(n_layers):
+            if kernel_architecture[i] != k:
+                k = kernel_architecture[i]
+                n_filters = 2**np.random.randint(1, filter_exp+1) 
+                filter_exp += 1
+                filter_architecture.append(n_filters)
+            else:
+                filter_architecture.append(n_filters)
+
+        return filter_architecture
+
+
+    def _make_kernel_config(self, n_layers):
+        kernel_sizes = np.array([3, 5, 9,])
+        available_layers = n_layers
+        n_of_each_kernel = []
+
+        for k in kernel_sizes:
+            if k == kernel_sizes[-1]:
+                n_of_k = available_layers
+            else:
+                n_of_k = np.random.randint(0, available_layers)
+            available_layers -= n_of_k
+            n_of_each_kernel.append(n_of_k)
+
+        kernel_architecture = []
+        for i, n in enumerate(n_of_each_kernel):
+            kernel_architecture += [kernel_sizes[i]]*n
+
+        print(kernel_architecture)
+        return kernel_architecture
+
     @classmethod
     def conv_out(self, conv_config, w):
         def o(w, k, s): return np.floor((w - k + 2*0)/s + 1)
@@ -83,7 +210,7 @@ class ConVaeGenerator(ModelGenerator):
         filter_a = conv_config[0]
         kernel_a = conv_config[1]
         strides_a = conv_config[2]
-        n = conv_config[3]
+        n = conv_config[4]
 
         for l in range(n):
             k = kernel_a[l]
@@ -103,7 +230,8 @@ class ConVaeGenerator(ModelGenerator):
         filter_architecture = conv_config[0]
         kernel_architecture = conv_config[1]
         strides_architecture = conv_config[2]
-        n_layers = conv_config[3]
+        pooling_config = conv_config[3]
+        n_layers = conv_config[4]
 
         parameters_config = config[1]
         beta = parameters_config[0]
@@ -111,6 +239,7 @@ class ConVaeGenerator(ModelGenerator):
         beta1 = parameters_config[2]
         beta2 = parameters_config[3]
         latent_dim = parameters_config[4]
+        sampling_dim = parameters_config[5]
 
         mode_config = config[2]
         clustering_config = config[3]
@@ -120,11 +249,14 @@ class ConVaeGenerator(ModelGenerator):
                     filter_architecture,
                     kernel_architecture,
                     strides_architecture,
+                    pooling_config,
                     latent_dim,
                     self.X,
                     beta=beta,
+                    sampling_dim=sampling_dim,
                     mode_config=mode_config,
-                    clustering_config=clustering_config
+                    clustering_config=clustering_config,
+                    labelled_data=self.labelled_data,
                 )
 
         opt = tf.train.AdamOptimizer
@@ -134,25 +266,37 @@ class ConVaeGenerator(ModelGenerator):
                 "beta2":beta2
                 }
 
-        model.compile_model()
+        activation = self.activations[np.random.randint(0, len(self.activations))]
+        graph_kwds = {
+                "activation":activation
+                }
+        model.compile_model(graph_kwds=graph_kwds)
         model.compute_gradients(opt, opt_args, opt_kwds)
         return model, config
 
     def fit_model(self, model, batch_size,):
-        sess = tf.InteractiveSession()
+        self.sess = tf.InteractiveSession()
+        with open("../scripts/run.py", "w") as fo:
+            fo.write("run={}".format(run.run + 1))
         lx, lz = model.train(
-                    sess,
+                    self.sess,
                     150,
                     "../drawing",
                     "../models", 
                     batch_size,
-                    earlystopping=True
+                    earlystopping=True,
+                    run=run.run
                 )
         self.loss_vals.append((lx, lz))
         return lx, lz
 
     def compute_performance(self, model, x_t, y_t):
-        perf = model.performance(x_t, y_t)
+        if self.train_clustering:
+            y_pred, targets = model.predict_cluster(self.sess)
+            ars = adjusted_rand_score(targets, y_pred)
+            nmi = normalized_mutual_info_score(targets, y_pred)
+            perf = (ars, nmi)
+
         self.performance_vals.append(perf)
         return perf
 

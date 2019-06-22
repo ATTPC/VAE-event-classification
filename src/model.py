@@ -89,7 +89,6 @@ class LatentModel:
         print("Pretraining .....")
         self.be_patient = False
         self.prev_loss = 0
-        lz_proxy = np.ones(epochs)
         all_lx = np.zeros(epochs)
         smooth_loss = np.zeros(epochs)
         #writer = tf.summary.FileWriter("../loss_records/tensorboard/pretrain", sess.graph) 
@@ -116,7 +115,7 @@ class LatentModel:
             to_earlystop = self.earlystopping(
                                 smooth_loss,
                                 all_lx,
-                                lz_proxy, 
+                                None, 
                                 i
                                 )
             if to_earlystop:
@@ -147,7 +146,6 @@ class LatentModel:
 
         return ret_array
 
-
     def train(
             self,
             sess,
@@ -172,17 +170,17 @@ class LatentModel:
             return
 
         K.set_session(sess)
+
+        self.performance = tf.placeholder(tf.float32, shape=(), name="score")
+        tf.summary.scalar("performance", self.performance)
         self.merged = tf.summary.merge_all()
         writer = tf.summary.FileWriter(
                 "../loss_records/tensorboard/run_{}".format(run),
                 sess.graph)
 
-        self.performance = tf.placeholder(tf.float32, shape=(), name="score")
-        tf.summary.scalar("performance", self.performance)
-
         self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
-
+        tf.local_variables_initializer().run() 
         # set session as self attribute to be available from sigint call
         self.sess = sess
         run_opts = tf.RunOptions(report_tensor_allocations_upon_oom=True)
@@ -200,7 +198,6 @@ class LatentModel:
             all_clf_loss = np.zeros(epochs)
 
         if self.include_KM:
-            update_interval = 500
             self.pretrain_clustering(sess, minibatch_size)
 
         print("starting training..")
@@ -222,13 +219,13 @@ class LatentModel:
             Update target distribution and check cluster performance
             """
             if self.include_KM:
-                if (i % update_interval) == 0:
+                if (i % self.update_interval) == 0:
                     to_break, performance = self.update_clusters(
-                            i, 
-                            sess,
-                            data_dir,
-                            model_dir,
-                            )
+                                                    i, 
+                                                    sess,
+                                                    data_dir,
+                                                    model_dir,
+                                                    )
 
                     if to_break:
                         break
@@ -327,10 +324,15 @@ class LatentModel:
 
         return all_lx, all_lz
 
-    def earlystopping(self, smooth_loss, all_lx, all_lz, i):
+    def earlystopping(self, smooth_loss, all_lx, all_lz=None, i=0):
         earlystop_beta = 0.95
         patience=5
-        smooth_loss[i] = (1 - earlystop_beta) * np.average([all_lx[i], all_lz[i]])
+        
+        if all_lz is None:
+            loss = all_lx[i]
+        else:
+            loss =  np.average([all_lx[i], all_lz[i]])
+        smooth_loss[i] = (1 - earlystop_beta) *loss
         smooth_loss[i] += earlystop_beta*self.prev_loss
         self.prev_loss = smooth_loss[i]
 
@@ -411,11 +413,11 @@ class LatentModel:
         return y_pred, targets
 
     def pretrain_clustering(self, sess, minibatch_size):
-        self.pretrain(sess, 20, minibatch_size)
-
         if self.pretrain_simulated:
             print("Simulated pretrain....")
-            self.train_simulated(sess, 20, minibatch_size)
+            self.train_simulated(sess, 15, minibatch_size)
+
+        self.pretrain(sess, self.pretrain_epochs, minibatch_size)
 
         print("Training K-means..... ")
         km = MiniBatchKMeans(
@@ -435,13 +437,20 @@ class LatentModel:
 
     def train_simulated(self, sess, epochs, minibatch_size):
         self.clf_fetches = self.compute_classifier_cost(self.optimizer)
-        all_clf_cost =  []
 
         for i in range(epochs):
             clf_bm_inst = BatchManager(self.X_c.shape[0], minibatch_size)
+            all_clf_cost =  []
+            all_clf_acc = []
             for batch_ind in clf_bm_inst:
-                clf_cost = self.run_clf_batch(sess, batch_ind, )
+                clf_cost, clf_acc = self.run_clf_batch(sess, batch_ind, )
                 all_clf_cost.append(clf_cost)
+                all_clf_acc.append(clf_acc)
+
+            print(
+                "clf cost", i, np.mean(all_clf_cost), 
+                " | clf_acc", i, np.mean(all_clf_acc),
+                )
 
         return all_clf_cost
 
@@ -449,16 +458,15 @@ class LatentModel:
         #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
         clf_batch = self.X_c[batch_ind]
         clf_batch = clf_batch.reshape(
-            np.size(batch_ind), self.n_input)
-
+                        np.size(batch_ind), self.n_input)
         t_batch = self.Y_c[batch_ind]
 
         # self.batch_size: minibatch_size}
         clf_feed_dict = {self.x: clf_batch,
                             self.y_batch: t_batch, }
-        clf_cost, _ = sess.run(
+        clf_cost, clf_acc, _ = sess.run(
             self.clf_fetches, clf_feed_dict, )
-        return clf_cost
+        return clf_cost, clf_acc
 
     def evaluate_classifier(
             self,
@@ -596,7 +604,7 @@ class LatentModel:
                 classifier_grads[i] = (tf.clip_by_norm(g, 5), v)
 
         self.classifier_op = optimizer.apply_gradients(classifier_grads)
-        clf_fetches = [self.classifier_cost, self.classifier_op]
+        clf_fetches = [self.classifier_cost, self.clf_acc, self.classifier_op]
         return clf_fetches
 
 

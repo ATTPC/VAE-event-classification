@@ -23,6 +23,7 @@ class ConVae(LatentModel):
             filter_arcitecture,
             kernel_architecture,
             strides_architecture,
+            pooling_architecture,
             latent_dim,
             X,
             beta=1,
@@ -53,6 +54,7 @@ class ConVae(LatentModel):
         self.filter_arcitecture = filter_arcitecture
         self.kernel_architecture = kernel_architecture
         self.strides_architecture = strides_architecture
+        self.pooling_architecture = pooling_architecture
 
         if self.include_KM and clustering_config == None:
             raise RuntimeError("when KM is true a config must be supplied")
@@ -105,6 +107,7 @@ class ConVae(LatentModel):
 
         for i in range(self.n_layers):
             with tf.name_scope("conv_"+str(i)):
+                print("conv in:", h1.get_shape())
                 filters = self.filter_arcitecture[i]
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
@@ -147,6 +150,10 @@ class ConVae(LatentModel):
                                 )(h1)
                         self.variable_summary(h1)
                     h1 = a(h1)
+
+                if self.pooling_architecture[i]:
+                    print("TO POOL", i)
+                    h1 = tf.layers.max_pooling2d(h1, 2, 2)
 
         shape = K.int_shape(h1)
         #print("Conv out shape", shape)
@@ -195,27 +202,28 @@ class ConVae(LatentModel):
 
         for i in reversed(range(self.n_layers)):
             with tf.name_scope("t_conv_"+str(i)):
-                filters = self.filter_arcitecture[i]
-                if i == 0:
+                if self.pooling_architecture[i]:
+                    de1 = ker.layers.UpSampling2D(size=(2,2))(de1) 
+                print("DECONV in", de1.get_shape())
+                if i==0:
                     filters = 1
+                else:
+                    filters = self.filter_arcitecture[i-1]
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
-                #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
 
+                #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
                 layer = ker.layers.Conv2DTranspose(
                                     filters=filters,
                                     kernel_size=(kernel_size, kernel_size),
-                                    strides=(1, 1),
-                                    output_padding=(0,0),
+                                    strides=(strides, strides),
+                                    output_padding=(strides-1, strides-1),
                                     padding="valid",
                                     use_bias=True,
                                     kernel_regularizer=k_reg,
                                     bias_regularizer=b_reg,
                                     )
                 de1 = layer(de1)
-
-                if strides==2:
-                    de1 = ker.layers.UpSampling2D(size=())(de1)
 
                 if i == 0:
                     with tf.name_scope("batch_norm"):
@@ -254,7 +262,7 @@ class ConVae(LatentModel):
                                 )(de1)
                         self.variable_summary(de1)
                     de1 = a(de1)
-            print("DECONV OUT SHAPE", layer.output_shape, i)
+
         """
         decoder_out = ker.layers.Conv2DTranspose(
                                 filters=1,
@@ -270,8 +278,6 @@ class ConVae(LatentModel):
         """
 
         #decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
-        print("LOOK HERE FUCKO", decoder_out.get_shape())
-
         decoder_out = tf.reshape(decoder_out, (self.batch_size, self.n_input), )
 
         self.output = decoder_out
@@ -298,7 +304,11 @@ class ConVae(LatentModel):
 
         if self.pretrain_simulated:
             self.y_batch = tf.placeholder(tf.float32)
-            self.classifier_cost = tf.losses.mean_squared_error(self.z_seq[0], self.y_batch)
+            self.clf_acc = tf.metrics.accuracy(
+                                tf.math.argmax(self.y_batch, axis=-1), 
+                                tf.math.argmax(self.q, axis=-1)
+                                )
+            self.classifier_cost = tf.losses.softmax_cross_entropy(self.y_batch, self.q)
 
         if self.include_KL:
             mu_sq = tf.square(self.mean)

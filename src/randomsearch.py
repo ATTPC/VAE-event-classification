@@ -1,10 +1,18 @@
 from model_generator import ModelGenerator
 import numpy as np
 import os 
-
+import sys
+sys.path.append("../scripts")
 
 class RandomSearch:
-    def __init__(self, X, x_t, y_t, model_gen: ModelGenerator):
+    def __init__(
+            self,
+            X,
+            x_t,
+            y_t,
+            model_gen: ModelGenerator,
+            clustering=True,
+            ):
         """
         Parameters:
         -----------
@@ -15,7 +23,8 @@ class RandomSearch:
         """
         self.x_t = x_t
         self.y_t = y_t
-        self.model_creator = model_gen(X)
+        n_classes = len(np.unique(self.y_t))
+        self.model_creator = model_gen(X, n_classes, [self.x_t, self.y_t], clustering)
 
     def search(self, n, batch_size, save_dir):
         to_save = [
@@ -33,13 +42,12 @@ class RandomSearch:
             lx, ly = self.model_creator.fit_model(model_inst, batch_size)
             performance  = self.model_creator.compute_performance(
                                     model_inst,
-                                    batch_size,
                                     self.x_t,
                                     self.y_t
                                     )
             self.savefiles(to_save, names, save_dir)
 
-    def savefiles(to_save, names, save_dir):
+    def savefiles(self, to_save, names, save_dir):
         for o, n in zip(to_save, names):
             o = np.array(o)
             fn = os.path.normpath(save_dir+n)
