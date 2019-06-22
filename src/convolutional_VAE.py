@@ -107,7 +107,6 @@ class ConVae(LatentModel):
 
         for i in range(self.n_layers):
             with tf.name_scope("conv_"+str(i)):
-                print("conv in:", h1.get_shape())
                 filters = self.filter_arcitecture[i]
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
@@ -132,32 +131,31 @@ class ConVae(LatentModel):
                     else: 
                         h1 = a(0.1)(h1)
                     with tf.name_scope("batch_norm"):
-                        h1 = BatchNormalization(
-                                axis=-1,
-                                center=True,
-                                scale=True,
-                                epsilon=1e-4,
-                                )(h1)
-                        self.variable_summary(h1)
+                        if self.batchnorm:
+                            h1 = BatchNormalization(
+                                    axis=-1,
+                                    center=True,
+                                    scale=True,
+                                    epsilon=1e-4,
+                                    )(h1)
+                            self.variable_summary(h1)
                 else:
                     a = activations[activation]
                     with tf.name_scope("batch_norm"):
-                        h1 = BatchNormalization(
-                                axis=-1,
-                                center=True,
-                                scale=True,
-                                epsilon=1e-4,
-                                )(h1)
-                        self.variable_summary(h1)
+                        if self.batchnorm:
+                            h1 = BatchNormalization(
+                                    axis=-1,
+                                    center=True,
+                                    scale=True,
+                                    epsilon=1e-4,
+                                    )(h1)
+                            self.variable_summary(h1)
                     h1 = a(h1)
 
                 if self.pooling_architecture[i]:
-                    print("TO POOL", i)
                     h1 = tf.layers.max_pooling2d(h1, 2, 2)
-                print("conv OUT", h1.get_shape())
 
         shape = K.int_shape(h1)
-        #print("Conv out shape", shape)
         h1 = tf.reshape(h1, (self.batch_size, shape[1]*shape[2]*shape[3]))
         h1 = Dense(self.sampling_dim, activation=activation)(h1)
 
@@ -182,9 +180,7 @@ class ConVae(LatentModel):
                                     shape=(self.n_clusters, self.latent_dim) ,
                                     initializer=tf.initializers.random_uniform()
                                     )
-
             self.q = self.clustering_layer(sample)
-            print("Q SHAP ", self.q.get_shape())
 
         self.z_seq = [sample,]
         self.dec_state_seq = []
@@ -193,17 +189,16 @@ class ConVae(LatentModel):
         # %%
         de1 = Dense(
                 shape[1] * shape[2] * shape[3],
-                activation=activation)(sample)
-
+                activation=activation)(sample) 
         with tf.name_scope("dense"):
-            de1 = BatchNormalization()(de1)
+            if self.batchnorm:
+                de1 = BatchNormalization()(de1)
             self.variable_summary(de1)
 
         de1 = tf.reshape(de1, (self.batch_size, shape[1], shape[2], shape[3]))
 
         for i in reversed(range(self.n_layers)):
             with tf.name_scope("t_conv_"+str(i)):
-                print("DECONV in", de1.get_shape())
                 if i==0:
                     filters = 1
                 else:
@@ -214,7 +209,7 @@ class ConVae(LatentModel):
                 if self.pooling_architecture[i]:
                     de1 = ker.layers.UpSampling2D(size=(2,2))(de1) 
                 if activation == None:
-                   pass 
+                    de1 = de1
                 elif activation=="relu" or activation=="lrelu":
                     a = keras_activations[activation]
                     if activation == "relu":
@@ -253,34 +248,20 @@ class ConVae(LatentModel):
                                     bias_regularizer=b_reg,
                                     )
                 de1 = layer(de1)
-                print("deconv OUT", de1.get_shape())
-
-        """
-        decoder_out = ker.layers.Conv2DTranspose(
-                                filters=1,
-                                kernel_size=2,
-                                activation='sigmoid',
-                                output_padding=(0, 0),
-                                #activation="relu",
-                                padding='valid',
-                                use_bias=True,
-                                kernel_regularizer=k_reg,
-                                bias_regularizer=b_reg,
-                                name='decoder_output')(de1)
-        """
 
         #decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
         with tf.name_scope("final_deconv"):
             with tf.name_scope("batch_norm"):
-                de1 = ker.layers.BatchNormalization(
-                    axis=-1,
-                    center=True,
-                    scale=True,
-                    epsilon=1e-4,
-                    )(de1)
+                if self.batchnorm:
+                    de1 = ker.layers.BatchNormalization(
+                        axis=-1,
+                        center=True,
+                        scale=True,
+                        epsilon=1e-4,
+                        )(de1)
             self.variable_summary(de1)
             decoder_out = tf.sigmoid(de1)
-        print("deconv FINAL", decoder_out.get_shape())
+        print("FINAL O", decoder_out.get_shape())
         decoder_out = tf.reshape(decoder_out, (self.batch_size, self.n_input), )
 
         self.output = decoder_out
@@ -297,7 +278,6 @@ class ConVae(LatentModel):
 
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
         x_recons = self.output
-
         if reconst_loss==None:
             reconst_loss = self.binary_crossentropy
             self.Lx = tf.reduce_mean(tf.reduce_sum(
@@ -348,7 +328,6 @@ class ConVae(LatentModel):
             else:
                 self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
                 self.Lz = self.beta*tf.reduce_mean(self.Lz)
-                print("lz shape", self.Lz.get_shape())
 
         else:
             self.Lz = self.Lx*0

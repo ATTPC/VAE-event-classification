@@ -51,6 +51,7 @@ class ConVaeGenerator(ModelGenerator):
                 "include_KL": False,
                 "include_MMD": False,
                 "include_KM:": False,
+                "batchnorm":False
                 }
 
         if self.train_clustering:
@@ -61,6 +62,10 @@ class ConVaeGenerator(ModelGenerator):
             if not latent == None:
                 mode_config[latent] = True
             clustering_config = {}
+
+        use_bm = np.random.randint(0,2)
+        if use_bm:
+            mode_config["batchnorm"] = True
 
         config.append(conv_config)
         config.append(parameters_config)
@@ -93,8 +98,9 @@ class ConVaeGenerator(ModelGenerator):
             pooling_config = self._make_vgg_pooling_config(n_layers)
         else:
             kernel_architecture = self._make_kernel_config(n_layers)
-            pooling_config = self._make_filter_config(n_layers)
             filter_architecture = self._make_filter_config(kernel_architecture)
+            pooling_config = self._make_pooling_config(n_layers)
+            print(pooling_config)
 
         conv_config = [
                 filter_architecture,
@@ -103,7 +109,6 @@ class ConVaeGenerator(ModelGenerator):
                 pooling_config,
                 n_layers,
                 ]
-        print("POOLING: ", pooling_config)
         return conv_config
     
     def _make_vgg_filters(self, kernel_architecture):
@@ -119,7 +124,8 @@ class ConVaeGenerator(ModelGenerator):
         return filter_architecture 
 
     def _make_pooling_config(self, n_layers):
-        return [0]*n_layers
+        pooling_conf = np.random.randint(0, 2, n_layers)
+        return pooling_conf
 
     def _make_vgg_pooling_config(self, n_layers):
         pooling_config = [0]*n_layers
@@ -137,9 +143,9 @@ class ConVaeGenerator(ModelGenerator):
                 "alpha":1,
                 "delta":0.01,
                 }
-        pre_epochs = [50, 100, 200]
+        pre_epochs = [50, 100, 200, 300]
         pretrain_epochs = pre_epochs[np.random.randint(0, len(pre_epochs))]
-        update_freq = [50, 150, 200]
+        update_freq = [1, 50, 150, 200]
         update_interval = update_freq[np.random.randint(0, len(update_freq))]
         pretrain_sim = np.random.randint(0, 2)
         if self.n_classes == 2:
@@ -180,9 +186,8 @@ class ConVaeGenerator(ModelGenerator):
 
         return filter_architecture
 
-
     def _make_kernel_config(self, n_layers):
-        kernel_sizes = np.array([3, 5, 9,])
+        kernel_sizes = np.array([11, 9, 5, 3])
         available_layers = n_layers
         n_of_each_kernel = []
 
@@ -198,29 +203,41 @@ class ConVaeGenerator(ModelGenerator):
         for i, n in enumerate(n_of_each_kernel):
             kernel_architecture += [kernel_sizes[i]]*n
 
-        print(kernel_architecture)
         return kernel_architecture
 
     @classmethod
     def conv_out(self, conv_config, w):
         def o(w, k, s): return np.floor((w - k + 2*0)/s + 1)
+        def to(w, k, s): return w*s + np.max([k-s,0])
 
         filter_a = conv_config[0]
         kernel_a = conv_config[1]
         strides_a = conv_config[2]
+        pool_a = conv_config[3]
+        to_compare = int(w)
         n = conv_config[4]
 
         for l in range(n):
             k = kernel_a[l]
             s = strides_a[l]
-            print("computed", w)
             w = o(w, k, s)
-        
-        print("final", w)
+            if pool_a[l]:
+                w /= 2
+
         if w < 2:
             return 1
-        else:
+
+        for l in reversed(range(n)):
+            if pool_a[l]:
+                w *= 2
+            k = kernel_a[l]
+            s = strides_a[l]
+            w = to(w, k, s)
+        
+        if w == to_compare:
             return 0
+        else:
+            return 1
 
     def _make_model(self, ):
         config = self.sample_hyperparameters()

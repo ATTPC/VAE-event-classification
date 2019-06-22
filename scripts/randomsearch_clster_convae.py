@@ -9,7 +9,7 @@ from randomsearch import RandomSearch
 
 from randomsearch_run import run
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 data = "simulated"
 
 print("PID", os.getpid())
@@ -31,7 +31,7 @@ except:
 with open("randomsearch_run.py", "w") as fo:
     fo.write("run={}".format(run+1))
 
-rs = RandomSearch(x_train, x_test, y_test, ConVaeGenerator)
+rs = RandomSearch(x_train, x_test, y_test, ConVaeGenerator, architecture="own")
 rs.search(n, 100, "../randomsearch_simulated/run_{}/".format(run))
 
 
