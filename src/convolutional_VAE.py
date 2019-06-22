@@ -124,8 +124,8 @@ class ConVae(LatentModel):
                 if i == 0:
                     continue
                 if activation == None:
-                    continue
-                if activation=="relu" or activation=="lrelu":
+                   pass 
+                elif activation=="relu" or activation=="lrelu":
                     a = activations[activation]
                     if activation == "relu":
                         h1 = a()(h1)
@@ -154,6 +154,7 @@ class ConVae(LatentModel):
                 if self.pooling_architecture[i]:
                     print("TO POOL", i)
                     h1 = tf.layers.max_pooling2d(h1, 2, 2)
+                print("conv OUT", h1.get_shape())
 
         shape = K.int_shape(h1)
         #print("Conv out shape", shape)
@@ -202,8 +203,6 @@ class ConVae(LatentModel):
 
         for i in reversed(range(self.n_layers)):
             with tf.name_scope("t_conv_"+str(i)):
-                if self.pooling_architecture[i]:
-                    de1 = ker.layers.UpSampling2D(size=(2,2))(de1) 
                 print("DECONV in", de1.get_shape())
                 if i==0:
                     filters = 1
@@ -212,32 +211,11 @@ class ConVae(LatentModel):
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
 
-                #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
-                layer = ker.layers.Conv2DTranspose(
-                                    filters=filters,
-                                    kernel_size=(kernel_size, kernel_size),
-                                    strides=(strides, strides),
-                                    output_padding=(strides-1, strides-1),
-                                    padding="valid",
-                                    use_bias=True,
-                                    kernel_regularizer=k_reg,
-                                    bias_regularizer=b_reg,
-                                    )
-                de1 = layer(de1)
-
-                if i == 0:
-                    with tf.name_scope("batch_norm"):
-                        de1 = ker.layers.BatchNormalization(
-                                axis=-1,
-                                center=True,
-                                scale=True,
-                                epsilon=1e-4,
-                                )(de1)
-                        self.variable_summary(de1)
-                    decoder_out = tf.sigmoid(de1)
+                if self.pooling_architecture[i]:
+                    de1 = ker.layers.UpSampling2D(size=(2,2))(de1) 
                 if activation == None:
-                    continue
-                if activation=="relu" or activation=="lrelu":
+                   pass 
+                elif activation=="relu" or activation=="lrelu":
                     a = keras_activations[activation]
                     if activation == "relu":
                         de1 = a(de1)
@@ -263,6 +241,20 @@ class ConVae(LatentModel):
                         self.variable_summary(de1)
                     de1 = a(de1)
 
+                #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
+                layer = ker.layers.Conv2DTranspose(
+                                    filters=filters,
+                                    kernel_size=(kernel_size, kernel_size),
+                                    strides=(strides, strides),
+                                    #output_padding=(strides-1, strides-1),
+                                    padding="valid",
+                                    use_bias=True,
+                                    kernel_regularizer=k_reg,
+                                    bias_regularizer=b_reg,
+                                    )
+                de1 = layer(de1)
+                print("deconv OUT", de1.get_shape())
+
         """
         decoder_out = ker.layers.Conv2DTranspose(
                                 filters=1,
@@ -278,6 +270,17 @@ class ConVae(LatentModel):
         """
 
         #decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
+        with tf.name_scope("final_deconv"):
+            with tf.name_scope("batch_norm"):
+                de1 = ker.layers.BatchNormalization(
+                    axis=-1,
+                    center=True,
+                    scale=True,
+                    epsilon=1e-4,
+                    )(de1)
+            self.variable_summary(de1)
+            decoder_out = tf.sigmoid(de1)
+        print("deconv FINAL", decoder_out.get_shape())
         decoder_out = tf.reshape(decoder_out, (self.batch_size, self.n_input), )
 
         self.output = decoder_out

@@ -12,6 +12,7 @@ class RandomSearch:
             y_t,
             model_gen: ModelGenerator,
             clustering=True,
+            architecture="vgg"
             ):
         """
         Parameters:
@@ -24,7 +25,14 @@ class RandomSearch:
         self.x_t = x_t
         self.y_t = y_t
         n_classes = len(np.unique(self.y_t))
-        self.model_creator = model_gen(X, n_classes, [self.x_t, self.y_t], clustering)
+        self.arch = architecture
+        self.model_creator = model_gen(
+                                X,
+                                n_classes,
+                                [self.x_t, self.y_t],
+                                clustering,
+                                architecture,
+                                )
 
     def search(self, n, batch_size, save_dir):
         to_save = [
@@ -33,9 +41,9 @@ class RandomSearch:
                 self.model_creator.performance_vals
                 ]
         names = [
-                "hyperparam_vals.npy",
-                "loss_vals.npy",
-                "performance.npy",
+                "hyperparam_vals_"+self.arch+".npy",
+                "loss_vals_"+self.arch+".npy",
+                "performance_"+self.arch+".npy",
                 ]
         for i in range(n):
             model_inst = self.model_creator.generate_config()

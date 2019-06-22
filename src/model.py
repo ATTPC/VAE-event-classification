@@ -168,9 +168,9 @@ class LatentModel:
         if not (self.compiled and self.grad_op):
             print("cannot train before model is compiled and gradients are computed")
             return
+        print("RUN NR",run)
 
         K.set_session(sess)
-
         self.performance = tf.placeholder(tf.float32, shape=(), name="score")
         tf.summary.scalar("performance", self.performance)
         self.merged = tf.summary.merge_all()

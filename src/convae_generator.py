@@ -36,10 +36,8 @@ class ConVaeGenerator(ModelGenerator):
 
     def sample_hyperparameters(self,):
         config = []
-        n_layers = np.random.randint(
-                        4,
-                        self.max_layers
-                        )
+        n_layers = np.random.randint(4, self.max_layers)
+        #n_layers = 7
         valid_conv_out = 1
         input_dim = self.X.shape[1]
         while valid_conv_out == 1:
@@ -125,7 +123,7 @@ class ConVaeGenerator(ModelGenerator):
 
     def _make_vgg_pooling_config(self, n_layers):
         pooling_config = [0]*n_layers
-        where_pool = np.array([2, 4, 7, 10, 13])-1
+        where_pool = np.array([2, 5, 7, 10, 13])-1
 
         for i in range(n_layers):
             if i in where_pool:
