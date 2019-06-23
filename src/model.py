@@ -5,12 +5,18 @@ import sys
 
 from keras import backend as K
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
-from sklearn.metrics import  adjusted_rand_score, normalized_mutual_info_score
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from batchmanager import BatchManager
 from sklearn.cluster import MiniBatchKMeans
 
+
 class LatentModel:
+    """
+    A class scaffolding framework for autoencoder structures.
+    Provides methods used by a convolutional AE as well as 
+    those used by sequential models like DRAW
+    """
 
     def __init__(
             self,
@@ -57,7 +63,18 @@ class LatentModel:
         regularizer=tf.contrib.layers.l2_regularizer,
         lmbd=0.1,
     ):
+        """
+        Ordinary linear transformation on the form x.T w + b
 
+        Parameters:
+            x (tensor): the input tothe transformation
+            output_dim  (int): the  specified output dimension of the transformation
+            regularizer (function): regularization function for the weights and biases
+            lmbd (float): strength of the regularization term
+
+        Returns::
+            y (tensor): the affine linear transformation of x with w and b
+        """
         w = tf.get_variable("w", [x.get_shape()[1], output_dim],
                             regularizer=regularizer(lmbd),
                             )
@@ -71,27 +88,49 @@ class LatentModel:
         return tf.matmul(x, w) + b
 
     def clustering_layer(self, inputs):
-        tmp = tf.square( tf.expand_dims(inputs, axis=1) - self.clusters)
+        """
+        Soft mapping from  a latent sample to a predictions on clusters
+        as described in https://xifengguo.github.io/papers/ICONIP17-DCEC.pdf
+
+        Parameters:
+            inputs (tensor): a tensor representing a latent sample in the model
+
+        Returns:
+            q (tensor): a soft mapping of the inputs to the clusters
+        """
+        tmp = tf.square(tf.expand_dims(inputs, axis=1) - self.clusters)
         q = 1.0 / (1.0 + (tf.reduce_sum(
-                                tmp,
-                                axis=2) / self.alpha))
+            tmp,
+            axis=2) / self.alpha))
         q **= (self.alpha + 1.0) / 2.0
         q = tf.transpose(tf.transpose(q) / tf.reduce_sum(q, axis=1))
         return q
 
     def pretrain(
-            self,
-            sess,
-            epochs,
-            minibatch_size,
-            ):
+        self,
+        sess,
+        epochs,
+        minibatch_size,
+    ):
+        """
+        A pretraining of the autoencoder structure on the reconstruction loss
+
+        Parameters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            epochs (int): number of iterations to run the pretraining for
+            minibatch_size (int): the size of the minibatches used to run the graph
+
+        Returns:
+            None
+
+        """
 
         print("Pretraining .....")
         self.be_patient = False
         self.prev_loss = 0
         all_lx = np.zeros(epochs)
         smooth_loss = np.zeros(epochs)
-        #writer = tf.summary.FileWriter("../loss_records/tensorboard/pretrain", sess.graph) 
+        #writer = tf.summary.FileWriter("../loss_records/tensorboard/pretrain", sess.graph)
         for i in range(epochs):
             bm = BatchManager(self.X.shape[0], minibatch_size)
             lxs = []
@@ -101,7 +140,7 @@ class LatentModel:
                 feed_dict = {self.x: to_run}
                 lx, _ = sess.run(self.pretrain_fetch, feed_dict)
                 lxs.append(lx)
-            
+
             cur_lx = np.average(lxs)
             all_lx[i] = cur_lx
             print("Lx: {}".format(i),  all_lx[i])
@@ -113,23 +152,34 @@ class LatentModel:
                 writer.write_summary(summary, i)
                 """
             to_earlystop = self.earlystopping(
-                                smooth_loss,
-                                all_lx,
-                                None, 
-                                i
-                                )
+                smooth_loss,
+                all_lx,
+                None,
+                i
+            )
             if to_earlystop:
                 return
 
-
     def run_large(
-            self,
-            sess,
-            to_run,
-            data,
-            input_tensor=None,
-            batch_size=100,
-            ):
+        self,
+        sess,
+        to_run,
+        data,
+        input_tensor=None,
+        batch_size=100,
+    ):
+        """
+        A method to run a large set of samples through the graph with a given set of fetches.
+
+        Parameters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            to_run (tensor ): tensorflow op for which we want the output from
+            input_tensor (tensor): the tensor placeholder that the to_run ops depends on
+            batch_size: the size of the minibatches used to run the graph
+
+        Returns:
+           ret_array (np.ndarray): the evaluation of the op for each datapoint
+        """
 
         if input_tensor == None:
             input_tensor = self.x
@@ -141,7 +191,7 @@ class LatentModel:
 
         for bi in bm:
             n_bi = bi.shape[0]
-            feed_dict = {input_tensor:data[bi].reshape((n_bi, self.n_input))}
+            feed_dict = {input_tensor: data[bi].reshape((n_bi, self.n_input))}
             ret_array[bi] = sess.run(to_run, feed_dict)
 
         return ret_array
@@ -159,28 +209,43 @@ class LatentModel:
             run=0,
     ):
         """
-        Paramters
-        ---------
+        Training procedure for the model. Includes calls to model evaluations and architecture specific 
+        pretrainings and general setup. Also saves models to disk at regular intervals and logs performance to be read
+        by a tensorboard instance 
 
+        Paramters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            epochs (int): number of iterations to run the pretraining for
+            data_dir (str): directory to save model outputs to
+            model_dir (str): directory to  checkpoint model to
+            minibatch_size (int): the size of the minibatches used to run the graph
+            save_checkpoints (bool): Whether or not to save model checkpoints
+            earlystopping (bool): whether to maintain an earlystopping procedure, monitors both Lx and Lz
+            checkpoint_fn  (str): path to pretrained model that can be loaded to the graph
+            run (int): the run designator used to save the summary for tensorboard visualization
+
+        Returns:
+            lx (array): all reconstruction losses per epoch
+            lz (array): all latent losses per epoch
 
         """
 
         if not (self.compiled and self.grad_op):
             print("cannot train before model is compiled and gradients are computed")
             return
-        print("RUN NR",run)
+        print("RUN NR", run)
 
         K.set_session(sess)
         self.performance = tf.placeholder(tf.float32, shape=(), name="score")
         tf.summary.scalar("performance", self.performance)
         self.merged = tf.summary.merge_all()
         writer = tf.summary.FileWriter(
-                "../loss_records/tensorboard/run_{}".format(run),
-                sess.graph)
+            "../loss_records/tensorboard/run_{}".format(run),
+            sess.graph)
 
         self.saver = tf.train.Saver()
         tf.global_variables_initializer().run()
-        tf.local_variables_initializer().run() 
+        tf.local_variables_initializer().run()
         # set session as self attribute to be available from sigint call
         self.sess = sess
         run_opts = tf.RunOptions(report_tensor_allocations_upon_oom=True)
@@ -209,7 +274,7 @@ class LatentModel:
             Lxs = []
             Lzs = []
             logloss_train = []
-            self.be_patient=False
+            self.be_patient = False
             bm_inst = BatchManager(self.n_data, minibatch_size)
 
             if self.train_classifier:
@@ -221,11 +286,11 @@ class LatentModel:
             if self.include_KM:
                 if (i % self.update_interval) == 0:
                     to_break, performance = self.update_clusters(
-                                                    i, 
-                                                    sess,
-                                                    data_dir,
-                                                    model_dir,
-                                                    )
+                        i,
+                        sess,
+                        data_dir,
+                        model_dir,
+                    )
 
                     if to_break:
                         return all_lx, all_lz
@@ -258,7 +323,8 @@ class LatentModel:
 
                 if self.train_classifier:
                     if (j % train_interval) == 0:
-                        batch_loss = self.train_classifier(sess, clf_bm_inst, run_opts)
+                        batch_loss = self.train_classifier(
+                            sess, clf_bm_inst, run_opts)
                         logloss_train.append(batch_loss)
 
             try:
@@ -273,7 +339,8 @@ class LatentModel:
             """Compute classifier performance """
 
             if self.train_classifier:
-                scores = self.evaluate_classifier(sess, all_clf_loss, logloss_train, i)
+                scores = self.evaluate_classifier(
+                    sess, all_clf_loss, logloss_train, i)
                 print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
                         train score {}  | test score {}".format(
                     i,
@@ -282,7 +349,7 @@ class LatentModel:
                     all_clf_loss[i],
                     scores[0],
                     scores[1]
-                    ),
+                ),
                 )
 
             else:
@@ -290,9 +357,9 @@ class LatentModel:
                     i,
                     all_lx[i],
                     all_lz[i]
-                    ),
+                ),
                     end="",
-                    )
+                )
 
             """
             if all_lz[i] < 0:
@@ -315,10 +382,10 @@ class LatentModel:
 
                 if earlystopping:
                     to_earlystop = self.earlystopping(
-                            smooth_loss,
-                            all_lx,
-                            all_lz,
-                            i)
+                        smooth_loss,
+                        all_lx,
+                        all_lz,
+                        i)
 
                     if to_earlystop:
                         break
@@ -329,14 +396,28 @@ class LatentModel:
         return all_lx, all_lz
 
     def earlystopping(self, smooth_loss, all_lx, all_lz=None, i=0):
+        """
+        Earlystopping procedure that signals a training that it should stop depending on 
+        if fitting values are increasing systematically. This implementation has patience in that
+        it tolerates increased cost for a couple of epochs depending on how large the deviation
+        becomes 
+
+        Parameters:
+            smooth_loss (array): an array of the exponentially smoothed losses
+            all_lx (array): array of all reconstruction losses
+            all_lz (array): array of all latent losses
+
+        Returns:
+            signal (int): bool indicating whether the training should terminate
+        """
         earlystop_beta = 0.5
-        patience=5
-        
+        patience = 5
+
         if all_lz is None:
             loss = all_lx[i]
         else:
-            loss =  np.average([all_lx[i], all_lz[i]])
-        smooth_loss[i] = (1 - earlystop_beta) *loss
+            loss = np.average([all_lx[i], all_lz[i]])
+        smooth_loss[i] = (1 - earlystop_beta) * loss
         smooth_loss[i] += earlystop_beta*self.prev_loss
         self.prev_loss = smooth_loss[i]
 
@@ -349,7 +430,7 @@ class LatentModel:
             if smooth_loss[i] < smooth_loss[i-1]:
                 self.be_patient = False
 
-        if self.be_patient and (i - self.patient_i) == patience: 
+        if self.be_patient and (i - self.patient_i) == patience:
             change = np.diff(smooth_loss[self.patient_i:  i])
             mean_change = change.mean()
             print("Earlystopping Mean", mean_change)
@@ -358,7 +439,7 @@ class LatentModel:
             print("----------")
             self.be_patient = False
             if mean_change > 0:
-                retval = 1 
+                retval = 1
 
         return retval
 
@@ -368,7 +449,23 @@ class LatentModel:
             sess,
             data_dir,
             model_dir
-            ):
+    ):
+        """
+        Updates the target distribtuion with which the latent loss is taken
+        with respect to. This is an implementation
+        as described in https://xifengguo.github.io/papers/ICONIP17-DCEC.pdf
+
+        Parameters:
+            i (int): current epoch index
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            data_dir (str): directory to save model outputs to
+            model_dir (str): directory to  checkpoint model to
+
+        Returns:
+            retval (int): signal indicating whether enough labels have changed compared to previous updates
+            performance (float): measure of how good the clustering is, if labelled data is included then use ARS
+
+        """
 
         tot_samp = self.X.shape[0]
         q = np.zeros((tot_samp, self.n_clusters))
@@ -390,7 +487,7 @@ class LatentModel:
             precent_changed = self.label_change(self.y_prev, all_pred)
             print()
             print("precent_changed: ", precent_changed)
-            if precent_changed  < self.delta:
+            if precent_changed < self.delta:
                 self.storeResult(sess, feed_dict, data_dir, model_dir, i)
                 retval = 1
             self.y_prev = all_pred
@@ -400,14 +497,25 @@ class LatentModel:
             ars = adjusted_rand_score(targets, y_pred)
             nmi = normalized_mutual_info_score(targets, y_pred)
             performance = ars
-            print( ) 
-            print("Confusion matrix: " )
+            print()
+            print("Confusion matrix: ")
             print(confusion_matrix(targets, y_pred))
             print("ARS : {:.3f} ' NMI: {:.3f} ".format(ars, nmi))
 
         return retval, ars
 
     def predict_cluster(self, sess):
+        """
+        Assigns labels to a set of labelled data
+
+        Parameters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+
+        Returns:
+            y_pred (array): predicted clusters 
+            targets (array): ground truth labels for the data
+
+        """
         x_label = self.labelled_data[0]
         n_x = x_label.shape[0]
         x_label = np.reshape(x_label, (n_x, self.n_input))
@@ -417,6 +525,18 @@ class LatentModel:
         return y_pred, targets
 
     def pretrain_clustering(self, sess, minibatch_size):
+        """
+        Pretrains the autoencoder model according to the procedure described in
+        https://xifengguo.github.io/papers/ICONIP17-DCEC.pdf. 
+
+        Parameters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            minibatch_size (int): the size of the minibatches used to run the graph
+
+        Returns:
+            None
+
+        """
         if self.pretrain_simulated:
             print("Simulated pretrain....")
             self.train_simulated(sess, 15, minibatch_size)
@@ -425,13 +545,13 @@ class LatentModel:
 
         print("Training K-means..... ")
         km = MiniBatchKMeans(
-                    n_clusters=self.n_clusters,
-                    n_init=50,
-                    batch_size=150,
-                    reassignment_ratio=0.5,
-                    max_iter=1000
-                    )
-        
+            n_clusters=self.n_clusters,
+            n_init=50,
+            batch_size=150,
+            reassignment_ratio=0.5,
+            max_iter=1000
+        )
+
         print("Compute z")
         z = self.run_large(sess, self.z_seq[0], self.X,)
         print("Fit k-means")
@@ -440,11 +560,24 @@ class LatentModel:
         self.clusters.load(km.cluster_centers_, sess)
 
     def train_simulated(self, sess, epochs, minibatch_size):
+        """
+        Auxilliary method to pretraining a classifier on simulated data
+        prior to clustering real data.
+
+        Parameters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            epochs (int): number of iterations to run the pretraining for
+            minibatch_size (int): the size of the minibatches used to run the graph
+
+        Returns:
+            all_clf_cost (array): classifier cost per epoch
+
+        """
         self.clf_fetches = self.compute_classifier_cost(self.optimizer)
 
         for i in range(epochs):
             clf_bm_inst = BatchManager(self.X_c.shape[0], minibatch_size)
-            all_clf_cost =  []
+            all_clf_cost = []
             all_clf_acc = []
             for batch_ind in clf_bm_inst:
                 clf_cost, clf_acc = self.run_clf_batch(sess, batch_ind, )
@@ -452,22 +585,31 @@ class LatentModel:
                 all_clf_acc.append(clf_acc)
 
             print(
-                "clf cost", i, np.mean(all_clf_cost), 
+                "clf cost", i, np.mean(all_clf_cost),
                 " | clf_acc", i, np.mean(all_clf_acc),
-                )
+            )
 
         return all_clf_cost
 
-    def run_clf_batch(self, sess, batch_ind ):
-        #batch_ind = np.random.randint(0, self.X_c.shape[0], size=(minibatch_size, ))
+    def run_clf_batch(self, sess, batch_ind):
+        """
+        helper method to run a batch of data on the clf cost and metric
+
+        Parameters:
+            sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
+            batch_ind (array): indices of the labelled data to be run in this batch
+
+        Returns:
+            clf_cost (array): classifier cost for the given data
+            clf_acc (array): classifier score for the given data 
+        """
         clf_batch = self.X_c[batch_ind]
         clf_batch = clf_batch.reshape(
-                        np.size(batch_ind), self.n_input)
+            np.size(batch_ind), self.n_input)
         t_batch = self.Y_c[batch_ind]
 
-        # self.batch_size: minibatch_size}
         clf_feed_dict = {self.x: clf_batch,
-                            self.y_batch: t_batch, }
+                         self.y_batch: t_batch, }
         clf_cost, clf_acc, _ = sess.run(
             self.clf_fetches, clf_feed_dict, )
         return clf_cost, clf_acc
@@ -478,7 +620,7 @@ class LatentModel:
             all_clf_loss,
             logloss_train,
             i
-            ):
+    ):
 
         all_clf_loss[i] = tf.reduce_mean(logloss_train).eval()
         train_tup = (self.X_c, self.Y_c)
@@ -611,7 +753,6 @@ class LatentModel:
         clf_fetches = [self.classifier_cost, self.clf_acc, self.classifier_op]
         return clf_fetches
 
-
     def _ModelGraph(self,):
         raise NotImplementedError(
             "could not compile pure latent class LatentModel")
@@ -642,7 +783,7 @@ class LatentModel:
         return -(t*tf.log(o+self.eps) + (1.0-t)*tf.log(1.0-o+self.eps))
 
     def mse(self, t, o):
-        return (t -  o)**2
+        return (t - o)**2
 
     def t_distribution(self, q):
         w = q**2 / q.sum(0)
@@ -735,7 +876,6 @@ class LatentModel:
             tf.summary.scalar('min', tf.reduce_min(var))
             tf.summary.histogram('histogram', var)
 
-
     def generate_latent(self, sess, save_dir, X_tup, save=True):
         """
         Parameters
@@ -763,7 +903,7 @@ class LatentModel:
                 dec_state_array = np.zeros(
                     (self.T, self.n_decoder_cells, 2, n_latent, self.dec_size))
             else:
-                dec_state_array = [0,]
+                dec_state_array = [0, ]
             reconstructions = np.zeros((self.T, n_latent, self.H*self.W))
             latent_bm = BatchManager(n_latent, 100)
 
