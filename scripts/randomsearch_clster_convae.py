@@ -9,7 +9,7 @@ from randomsearch import RandomSearch
 
 from randomsearch_run import run
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 data = "simulated"
 
 print("PID", os.getpid())
@@ -21,8 +21,7 @@ if data=="simulated":
     y_train = np.load("../data/simulated/train_targets.npy")
     y_test = np.load("../data/simulated/test_targets.npy")
 
-n = 100
-print("OG IMG DIM", x_train.shape[1])
+n = 1000
 try:
     os.mkdir("../randomsearch_simulated/run_{}".format(run))
 except:
@@ -31,7 +30,7 @@ except:
 with open("randomsearch_run.py", "w") as fo:
     fo.write("run={}".format(run+1))
 
-rs = RandomSearch(x_train, x_test, y_test, ConVaeGenerator, architecture="own")
+rs = RandomSearch(x_train, x_test, y_test, ConVaeGenerator, architecture="vgg")
 rs.search(n, 100, "../randomsearch_simulated/run_{}/".format(run))
 
 

@@ -208,7 +208,7 @@ class ConVaeGenerator(ModelGenerator):
     @classmethod
     def conv_out(self, conv_config, w):
         def o(w, k, s): return np.floor((w - k + 2*0)/s + 1)
-        def to(w, k, s): return w*s + np.max([k-s,0])
+        def to(w, k, s): return np.ceil(w*s + np.max([k-s,0]))
 
         filter_a = conv_config[0]
         kernel_a = conv_config[1]
@@ -295,7 +295,7 @@ class ConVaeGenerator(ModelGenerator):
             fo.write("run={}".format(run.run + 1))
         lx, lz = model.train(
                     self.sess,
-                    150,
+                    2000,
                     "../drawing",
                     "../models", 
                     batch_size,

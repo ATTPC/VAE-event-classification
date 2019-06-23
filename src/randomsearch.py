@@ -2,6 +2,7 @@ from model_generator import ModelGenerator
 import numpy as np
 import os 
 import sys
+import tensorflow as tf
 sys.path.append("../scripts")
 
 class RandomSearch:
@@ -46,14 +47,17 @@ class RandomSearch:
                 "performance_"+self.arch+".npy",
                 ]
         for i in range(n):
-            model_inst = self.model_creator.generate_config()
-            lx, ly = self.model_creator.fit_model(model_inst, batch_size)
-            performance  = self.model_creator.compute_performance(
-                                    model_inst,
-                                    self.x_t,
-                                    self.y_t
-                                    )
-            self.savefiles(to_save, names, save_dir)
+            try:
+                model_inst = self.model_creator.generate_config()
+                lx, ly = self.model_creator.fit_model(model_inst, batch_size)
+                performance  = self.model_creator.compute_performance(
+                                        model_inst,
+                                        self.x_t,
+                                        self.y_t
+                                        )
+                self.savefiles(to_save, names, save_dir)
+            except tf.errors.InvalidArgumentError:
+                continue
 
     def savefiles(self, to_save, names, save_dir):
         for o, n in zip(to_save, names):

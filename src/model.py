@@ -228,7 +228,10 @@ class LatentModel:
                                                     )
 
                     if to_break:
-                        break
+                        return all_lx, all_lz
+                    if performance < 0.1:
+                        return all_lx, all_lz
+
             else:
                 performance = np.average([Lxs[-1], Lzs[-1]])
 
@@ -300,8 +303,9 @@ class LatentModel:
             """
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
-                print("nan loss value")
-                break
+                return all_lx, all_lz
+            if all_lz[i] < 0:
+                return all_lx, all_lz
 
             if (1 + i) % log_every == 0 and i >= 0:
                 "log performance to tensorboard"
@@ -325,7 +329,7 @@ class LatentModel:
         return all_lx, all_lz
 
     def earlystopping(self, smooth_loss, all_lx, all_lz=None, i=0):
-        earlystop_beta = 0.95
+        earlystop_beta = 0.5
         patience=5
         
         if all_lz is None:
