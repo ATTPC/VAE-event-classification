@@ -48,13 +48,21 @@ class DRAW(LatentModel):
 
             X_classifier=None,
             Y_classifier=None,
+            labelled_data=None,
             attn_config=None,
             mode_config=None,
+            clustering_config=None,
             test_split=0,
-            run=None
     ):
 
         # adding save on interrupt
+
+        self.simulated_mode = False
+        self.restore_mode = False
+        self.include_KL = False
+        self.include_MMD = False
+        self.include_KM = False
+        self.pretrain_simulated = False
 
         super().__init__(X, latent_dim, beta, mode_config)
 
@@ -68,6 +76,7 @@ class DRAW(LatentModel):
         self.eps = 1e-8
 
         self.train_classifier = train_classifier
+        self.labelled_data = labelled_data
 
         if self.train_classifier:
             test_split = test_split if test_split != 0 else 0.25
@@ -92,6 +101,12 @@ class DRAW(LatentModel):
                 if isinstance(val, (np.ndarray, )):
                     val = tf.convert_to_tensor(val)
 
+                setattr(self, key, val)
+
+        if self.include_KM and clustering_config == None:
+            raise RuntimeError("when KM is true a config must be supplied")
+        elif self.include_KM and clustering_config != None:
+            for key, val in clustering_config.items():
                 setattr(self, key, val)
 
         self.DO_SHARE = None
@@ -157,6 +172,11 @@ class DRAW(LatentModel):
         dec_state = self.decoder.zero_state(self.batch_size, tf.float32)
         enc_state = self.encoder.zero_state(self.batch_size, tf.float32)
 
+        if self.include_KM:
+            self.latent_cell = tf.nn.rnn_cell.BasicRNNCell(self.latent_dim)
+            latent_state = self.latent_cell.zero_state(self.batch_size, tf.float32)
+            print("STATE SIZE", latent_state.get_shape())
+
         # Unrolling the computational graph for the LSTM
         for t in range(self.T):
             # computing the error image
@@ -170,10 +190,20 @@ class DRAW(LatentModel):
             #r = tf.tanh(r)
             h_enc, enc_state = self.encode(
                 enc_state, tf.concat([r, h_dec_prev], 1))
-
+            
             if self.include_KL:
                 z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(
                     h_enc)
+            if self.include_KM:
+                with tf.variable_scope("sample"):
+                    z, latent_state = self.latent_cell(h_enc, latent_state)
+                    if t == (self.T - 1):
+                        self.clusters = tf.get_variable(
+                                                "clusters",
+                                                shape=(self.n_clusters, self.latent_dim) ,
+                                                initializer=tf.initializers.random_uniform(),
+                                                )
+                        self.q = self.clustering_layer(z)
             else:
                 with tf.variable_scope("sample", reuse=self.DO_SHARE):
                     z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
@@ -188,31 +218,6 @@ class DRAW(LatentModel):
             self.dec_state_seq[t] = dec_state
             h_dec_prev = h_dec
             c_prev = self.canvas_seq[t]
-
-            if t == -1:
-                print("------------ TRAINABLE PARAMS -------------")
-                total_params = 0
-
-                for variable in tf.global_variables():
-                    i = 1
-                    shape = variable.get_shape()
-
-                    for s in shape.as_list():
-                        if s is None:
-                            continue
-                        else:
-                            i *= s
-
-                    total_params += i
-
-                    print("name: ", variable.name)
-                    print("shape: ", shape)
-                    print("number of params: ", i)
-                    print(" ######## ")
-
-                print("------- TOTAL TRAINABLE PARAMS --------- ")
-                print(total_params)
-                print("----------------------------------------")
 
             self.DO_SHARE = True
 
@@ -254,7 +259,6 @@ class DRAW(LatentModel):
         self.scale_kl = scale_kl
 
         if self.include_KL:
-
             KL_loss = [0]*self.T
 
             for t in range(self.T):
@@ -271,6 +275,14 @@ class DRAW(LatentModel):
                 self.Lz *= self.kl_scale
             else:
                 self.Lz = tf.reduce_mean(KL)
+        elif self.include_KM:
+            self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
+            if self.include_MMD:
+                mmd = self.compute_mmd(self.p, self.q)
+                self.Lz = self.beta*mmd
+            else:
+                self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
+                self.Lz = self.beta*tf.reduce_mean(self.Lz)
 
         elif self.include_MMD:
 
@@ -278,7 +290,6 @@ class DRAW(LatentModel):
 
             norm1 = tf.distributions.Normal(0., 1.)
             norm2 = tf.distributions.Normal(6., 1.)
-            norm3 = tf.distributions.Normal(-6., 1.)
             binom = tf.distributions.Multinomial(1., probs=[4/10, 2/10, 4/10])
             self.Lz = 0
 
