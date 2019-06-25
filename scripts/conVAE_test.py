@@ -19,7 +19,6 @@ from keras.utils import to_categorical
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 from keras.datasets import mnist
 
 
@@ -61,10 +60,9 @@ def compute_accuracy(X, y, Xtest, ytest):
 
 # Training dat
 #X = np.load("../data/processed/all_0130.npy")
-"""
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
-x_train = np.expand_dims(x_train, -1)
-x_test= np.expand_dims(x_test, -1)
+x_train = np.expand_dims(x_train, -1)[0:40000]/255
+x_test= np.expand_dims(x_test, -1)/255
 
 """
 #Labelled data for testing
@@ -76,28 +74,34 @@ train_data = np.load("../data/processed/train.npy")
 test_data = np.load("../data/processed/test.npy")
 
 train_test = np.concatenate((train_data, test_data))
+"""
 
+n_layers = 3
+filter_architecture = [32, 64, 128]
+kernel_arcitecture = [5, 5, 3,]
+strides_architecture = [1, 1, 1,]
+pool_architecture = [0, 0, 0]
+epochs = 2000
 
-n_layers = 4
-filter_architecture = [20, 80, 30, 5]
-kernel_arcitecture = [2, 3, 3, 2]
-strides_architecture = [1, 2, 1, 1]
-epochs = 25
-
-latent_dim = 300
-batch_size = 100
+latent_dim = 10
+batch_size = 200
 
 mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
         "include_MMD": False,
-        "include_KM": True
+        "include_KM": True,
+
         }
 
 clustering_config = {
         "n_clusters":10,
         "alpha":1,
+        "delta":0.01,
+        "pretrain_simulated":False,
+        "pretrain_epochs": 200,
+        "update_interval": 140,
         }
 
 cvae = ConVae(
@@ -105,10 +109,14 @@ cvae = ConVae(
         filter_architecture,
         kernel_arcitecture,
         strides_architecture,
+        pool_architecture,
         latent_dim,
-        X,
-        beta=10000,
-        mode_config=mode_config
+        x_train,
+        beta=0.9,
+        sampling_dim=10,
+        clustering_config=clustering_config,
+        mode_config=mode_config,
+        labelled_data=[x_test, y_test],
         )
 
 cvae.p_f = np.random.normal(size=(x_train.shape[0], 10, ))
@@ -116,12 +124,14 @@ cvae.p_f = np.random.normal(size=(x_train.shape[0], 10, ))
 with tf.variable_scope("clusters"):
     cvae.clusters = tf.Variable(np.random.normal(size=(10, latent_dim)).astype(np.float32))
 
-cvae.compile_model()
+graph_kwds = {"activation":"relu", "output_activation":"relu"}
+loss_kwds = {"reconst_loss": "mse"}
+cvae.compile_model(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
-opt_args = [1e-4, ]
+opt_args = [1e-3, ]
 opt_kwds = {
-    "beta1": 0.5,
+    "beta1": 0.9,
 }
 
 cvae.compute_gradients(opt, opt_args, opt_kwds)
@@ -133,7 +143,7 @@ lx, lz = cvae.train(
         "../drawing",
         "../models",
         batch_size,
-        earlystopping=False,
+        earlystopping=True,
         )
 
 

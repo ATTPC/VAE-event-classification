@@ -38,11 +38,11 @@ else:
     x_train = np.load("../data/clean/images/train.npy")
     y_train = np.load("../data/clean/targets/train_targets.npy")
 
-n_layers = 6
+n_layers = 3
 filter_architecture = [16]*3 + [32]*3 + [64]*2
 kernel_arcitecture = [3, 3, 3, 3, 3, 3, 3, 3,]  
 strides_architecture = [1,] * 3 + [1,] + [1,]*4
-epochs = 1000
+epochs = 5000
 
 latent_dim = 75
 batch_size = 100
@@ -72,7 +72,7 @@ cvae = ConVae(
         strides_architecture,
         latent_dim,
         X,
-        beta=10000,
+        beta=10,
         mode_config=mode_config,
         clustering_config=clustering_config,
         labelled_data=[x_train, y_train],
