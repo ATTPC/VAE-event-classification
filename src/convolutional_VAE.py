@@ -42,6 +42,7 @@ class ConVae(LatentModel):
         self.include_MMD = False
         self.include_KM = False
         self.pretrain_simulated = False
+        self.batchnorm = False
 
         super().__init__(X, latent_dim, beta, mode_config)
         self.use_attention = False
@@ -74,6 +75,7 @@ class ConVae(LatentModel):
             bias_reg=reg.l2,
             bias_reg_strenght=0.01,
             activation="relu",
+            output_activation="sigmoid",
             ):
         """
         Parameters
@@ -217,31 +219,32 @@ class ConVae(LatentModel):
                     else: 
                         de1 = a(0.1)(de1)
                     with tf.name_scope("batch_norm"):
-                        de1 = ker.layers.BatchNormalization(
-                                axis=-1,
-                                center=True,
-                                scale=True,
-                                epsilon=1e-4,
-                                )(de1)
-                        self.variable_summary(de1)
+                        if self.batchnorm:
+                            de1 = ker.layers.BatchNormalization(
+                                    axis=-1,
+                                    center=True,
+                                    scale=True,
+                                    epsilon=1e-4,
+                                    )(de1)
+                            self.variable_summary(de1)
                 else:
                     a = keras_activations[activation]
                     with tf.name_scope("batch_norm"):
-                        de1 = ker.layers.BatchNormalization(
-                                axis=-1,
-                                center=True,
-                                scale=True,
-                                epsilon=1e-4,
-                                )(de1)
-                        self.variable_summary(de1)
+                        if self.batchnorm:
+                            de1 = ker.layers.BatchNormalization(
+                                    axis=-1,
+                                    center=True,
+                                    scale=True,
+                                    epsilon=1e-4,
+                                    )(de1)
+                            self.variable_summary(de1)
                     de1 = a(de1)
 
-                #activation = activation if i != 0 else None#tf.keras.layers.ThresholdedReLU(theta=-5.)
                 layer = ker.layers.Conv2DTranspose(
                                     filters=filters,
                                     kernel_size=(kernel_size, kernel_size),
                                     strides=(strides, strides),
-                                    #output_padding=(strides-1, strides-1),
+                                    output_padding=(strides-1, strides-1),
                                     padding="valid",
                                     use_bias=True,
                                     kernel_regularizer=k_reg,
@@ -259,8 +262,9 @@ class ConVae(LatentModel):
                         scale=True,
                         epsilon=1e-4,
                         )(de1)
-            self.variable_summary(de1)
-            decoder_out = tf.sigmoid(de1)
+                    self.variable_summary(de1)
+            print("output a", output_activation)
+            decoder_out = keras_activations[output_activation](de1)
         print("FINAL O", decoder_out.get_shape())
         decoder_out = tf.reshape(decoder_out, (self.batch_size, self.n_input), )
 
@@ -327,12 +331,12 @@ class ConVae(LatentModel):
                 self.Lz = self.beta*mmd
             else:
                 self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
-                self.Lz = self.beta*tf.reduce_mean(self.Lz)
+                self.Lz = tf.reduce_mean(self.Lz)
 
         else:
             self.Lz = self.Lx*0
 
-        self.cost = self.Lx + self.Lz
+        self.cost = self.beta*self.Lx + (1-self.beta)*self.Lz
         self.scale_kl = scale_kl
         tf.summary.scalar("Lx", self.Lx)
         tf.summary.scalar("Lz", self.Lz)

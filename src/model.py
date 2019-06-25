@@ -1,14 +1,21 @@
 import tensorflow as tf
-import signal
 import numpy as np
 import sys
+import signal
+import os
 
 from keras import backend as K
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from batchmanager import BatchManager
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import MiniBatchKMeans, KMeans
+from plotting import plot_confusion_matrix
 
 
 class LatentModel:
@@ -184,15 +191,31 @@ class LatentModel:
         if input_tensor == None:
             input_tensor = self.x
 
-        to_shape = list(to_run.get_shape())
-        to_shape[0] = data.shape[0]
-        ret_array = np.zeros(to_shape)
+        ret_array = []
+        n_to_run = data.shape[0]
+
+        if isinstance(to_run, (list, np.ndarray)):
+            for a in to_run:
+                a_shp = list(a.get_shape())
+                a_shp[0] = n_to_run
+                ret_array.append(np.zeros(a_shp))
+        else:
+            a_shp = list(to_run.get_shape())
+            a_shp[0] = n_to_run
+            ret_array = np.zeros(a_shp)
+
         bm = BatchManager(data.shape[0], batch_size)
 
         for bi in bm:
             n_bi = bi.shape[0]
             feed_dict = {input_tensor: data[bi].reshape((n_bi, self.n_input))}
-            ret_array[bi] = sess.run(to_run, feed_dict)
+            run_batch = sess.run(to_run, feed_dict)
+
+            if isinstance(to_run, (list, np.ndarray)):
+                for i in range(len(to_run)):
+                    ret_array[i][bi] = run_batch[i]
+            else:
+                ret_array[bi] = run_batch
 
         return ret_array
 
@@ -296,7 +319,6 @@ class LatentModel:
                         return all_lx, all_lz
                     if performance < 0.1:
                         return all_lx, all_lz
-
             else:
                 performance = np.average([Lxs[-1], Lzs[-1]])
 
@@ -307,7 +329,6 @@ class LatentModel:
             for j, ind in enumerate(bm_inst):
                 batch = self.X[ind]
                 batch = batch.reshape(np.size(ind), self.n_input)
-
                 # self.batch_size: minibatch_size}
                 feed_dict = {self.x: batch, }
                 if self.scale_kl:
@@ -326,7 +347,6 @@ class LatentModel:
                         batch_loss = self.train_classifier(
                             sess, clf_bm_inst, run_opts)
                         logloss_train.append(batch_loss)
-
             try:
                 Lzs = np.array(Lzs)
                 tmp = np.average(Lzs)
@@ -334,7 +354,7 @@ class LatentModel:
             except ValueError:
                 all_lz[i] = 1e5
 
-            all_lx[i] = tf.reduce_mean(Lxs).eval()
+            all_lx[i] = np.average(Lxs)
 
             """Compute classifier performance """
 
@@ -353,21 +373,13 @@ class LatentModel:
                 )
 
             else:
-                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} \r".format(
+                print("Epoch {} | Lx = {:5.4f} | Lz = {:5.4f} \r".format(
                     i,
                     all_lx[i],
                     all_lz[i]
                 ),
                     end="",
                 )
-
-            """
-            if all_lz[i] < 0:
-                print("broken training")
-                print("Lx = ", all_lx[i])
-                print("Lz = ", all_lz[i])
-                break
-            """
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
                 return all_lx, all_lz
@@ -379,6 +391,7 @@ class LatentModel:
                 feed_dict[self.performance] = performance
                 summary = sess.run(self.merged, feed_dict=feed_dict)
                 writer.add_summary(summary, i)
+                self.evaluate_cluster(sess, i)
 
                 if earlystopping:
                     to_earlystop = self.earlystopping(
@@ -386,13 +399,11 @@ class LatentModel:
                         all_lx,
                         all_lz,
                         i)
-
                     if to_earlystop:
                         break
 
                 if save_checkpoints:
                     self.storeResult(sess, feed_dict, data_dir, model_dir, i)
-
         return all_lx, all_lz
 
     def earlystopping(self, smooth_loss, all_lx, all_lz=None, i=0):
@@ -467,6 +478,30 @@ class LatentModel:
 
         """
 
+        km = KMeans(
+            n_clusters=self.n_clusters,
+            n_init=1000,
+            max_iter=1000,
+            n_jobs=10,
+        )
+
+        print("Compute z")
+        z = self.run_large(sess, self.z_seq[0], self.X,)
+        print("Fit k-means")
+        km.fit(z)
+        print("assign clusters")
+
+        predef_km = KMeans(
+            n_clusters=self.n_clusters,
+            init=sess.run(self.clusters, {}),
+            n_init=10,
+            max_iter=1000,
+            n_jobs=10,
+                )
+
+        to_use = km if km.inertia_ < predef_km.inertia_ else predef_km
+        self.clusters.load(to_use.cluster_centers_, sess)
+
         tot_samp = self.X.shape[0]
         q = np.zeros((tot_samp, self.n_clusters))
         clst_bm = BatchManager(tot_samp, 100)
@@ -504,6 +539,59 @@ class LatentModel:
 
         return retval, ars
 
+    def evaluate_cluster(self, sess, i=None):
+        def dkl(p, q): return p * np.log(p/q)
+        if i is None:
+            dir_str = ""
+        else:
+            try:
+                os.mkdir("../plots/{}".format(i))
+            except:
+                pass
+            dir_str = "{}/".format(i)
+        y_pred, targets = self.predict_cluster(sess)
+        zq_fetch = [self.z_seq[0], self.q]
+        z, q = self.run_large(sess, zq_fetch, self.labelled_data[0])
+        centroids = sess.run(self.clusters, {})
+        fig, ax = plot_confusion_matrix(targets, y_pred, np.arange(0,10).astype(str))
+        plt.savefig("../plots/"+dir_str+"cof_matr.png")
+        plt.cla()
+        plt.clf()
+        plt.close(fig)
+
+        fig, ax = plt.subplots()
+        im = ax.imshow(centroids, interpolation='nearest', cmap=plt.cm.Blues)
+        ax.figure.colorbar(im, ax=ax)
+
+        fmt = '.2f'
+        thresh = centroids.max() / 2.
+        for i in range(centroids.shape[0]):
+            for j in range(centroids.shape[1]):
+                ax.text(j, i, format(centroids[i, j], fmt),
+                        ha="center", va="center",
+                        color="white" if centroids[i, j] > thresh else "black")
+        fig.tight_layout()
+        plt.savefig("../plots/"+dir_str+"centroids.png")
+        plt.cla()
+        plt.clf()
+        plt.close(fig)
+
+        for i in range(len(np.unique(targets))):
+            g = sns.jointplot(
+                    self.P[:np.min([self.P.shape[0], 500]),i],
+                    q[:np.min([q.shape[0], 500]),i],
+                    )
+            plt.savefig("../plots/"+dir_str+"pq_dist{}.png".format(i))
+            plt.clf()
+            plt.cla()
+            plt.close(g.fig)
+
+        if z.shape[1] == 2:
+            fig, ax = plt.subplts(figsize=(10, 10))
+            ax.scatter(z)
+            plt.savefig("../plots/z_scatter.png")
+            plt.close(fig)
+
     def predict_cluster(self, sess):
         """
         Assigns labels to a set of labelled data
@@ -528,6 +616,7 @@ class LatentModel:
         """
         Pretrains the autoencoder model according to the procedure described in
         https://xifengguo.github.io/papers/ICONIP17-DCEC.pdf. 
+        Simply an end to end autoencoder with just the reconstruction loss
 
         Parameters:
             sess (tf.session): the session object with which we use to run the graph to update weights and evaluate losses
@@ -544,12 +633,11 @@ class LatentModel:
         self.pretrain(sess, self.pretrain_epochs, minibatch_size)
 
         print("Training K-means..... ")
-        km = MiniBatchKMeans(
+        km = KMeans(
             n_clusters=self.n_clusters,
-            n_init=50,
-            batch_size=150,
-            reassignment_ratio=0.5,
-            max_iter=1000
+            n_init=1000,
+            max_iter=1000,
+            n_jobs=10,
         )
 
         print("Compute z")
@@ -574,6 +662,7 @@ class LatentModel:
 
         """
         self.clf_fetches = self.compute_classifier_cost(self.optimizer)
+        self.clf_fetches += self.pretrain_fetch
 
         for i in range(epochs):
             clf_bm_inst = BatchManager(self.X_c.shape[0], minibatch_size)
@@ -610,7 +699,7 @@ class LatentModel:
 
         clf_feed_dict = {self.x: clf_batch,
                          self.y_batch: t_batch, }
-        clf_cost, clf_acc, _ = sess.run(
+        clf_cost, clf_acc, _, _, _ = sess.run(
             self.clf_fetches, clf_feed_dict, )
         return clf_cost, clf_acc
 

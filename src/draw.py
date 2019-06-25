@@ -190,7 +190,6 @@ class DRAW(LatentModel):
             #r = tf.tanh(r)
             h_enc, enc_state = self.encode(
                 enc_state, tf.concat([r, h_dec_prev], 1))
-            
             if self.include_KL:
                 z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(
                     h_enc)
@@ -248,6 +247,8 @@ class DRAW(LatentModel):
 
         if reconst_loss is None:
             reconst_loss = self.binary_crossentropy
+        if reconst_loss == "mse":
+            reconst_loss = self.mse
 
         x_recons = tf.sigmoid(self.canvas_seq[-1])
         #x_recons = tf.clip_by_value(self.canvas_seq[-1], 0, 1)
@@ -283,6 +284,14 @@ class DRAW(LatentModel):
             else:
                 self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
                 self.Lz = self.beta*tf.reduce_mean(self.Lz)
+
+            if self.pretrain_simulated:
+                self.y_batch = tf.placeholder(tf.float32)
+                self.clf_acc = tf.metrics.accuracy(
+                                    tf.math.argmax(self.y_batch, axis=-1), 
+                                    tf.math.argmax(self.q, axis=-1)
+                                    )
+                self.classifier_cost = tf.losses.softmax_cross_entropy(self.y_batch, self.q)
 
         elif self.include_MMD:
 
@@ -421,8 +430,6 @@ class DRAW(LatentModel):
 
         else:
             with tf.variable_scope("read", reuse=self.DO_SHARE):
-                print("WHAT THE FUCK")
-
                 gamma = self.linear(h_dec_prev, 1)
                 x = gamma*x
 
@@ -484,18 +491,6 @@ class DRAW(LatentModel):
             "input_dim": 4,
             "input_filters": 128,
         }
-        """
-
-        deconv_architecture = {
-                "n_layers": 1,
-                "strides": [3, ],
-                "kernel_size": [3, ],
-                "filters": [50, ],
-                "activation": [1,],
-                "input_dim": 5,
-                "input_filters": 128,
-               }
-        """
 
         with tf.variable_scope("write", reuse=self.DO_SHARE):
 
@@ -629,8 +624,8 @@ class DRAW(LatentModel):
     def read_attn(self, x, xhat, h_dec_prev, Fx, Fy, gamma, N):
         Fx_t = tf.transpose(Fx, perm=[0, 2, 1])
 
-        x = tf.reshape(x, [-1, 128, 128])
-        xhat = tf.reshape(xhat, [-1, 128, 128])
+        x = tf.reshape(x, [-1, self.H, self.W])
+        xhat = tf.reshape(xhat, [-1, self.H, self.W])
 
         FyxFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
         FyxhatFx_t = tf.reshape(tf.matmul(Fy, tf.matmul(x, Fx_t)), [-1, N*N])
