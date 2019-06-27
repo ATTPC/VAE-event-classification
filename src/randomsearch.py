@@ -36,6 +36,10 @@ class RandomSearch:
                                 )
 
     def search(self, n, batch_size, save_dir):
+        try:
+            os.mkdir("save_dir")
+        except FileExistsError:
+            pass
         to_save = [
                 self.model_creator.hyperparam_vals,
                 self.model_creator.loss_vals,

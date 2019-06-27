@@ -24,7 +24,7 @@ from keras.datasets import mnist
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 def longform_latent(latent,):
     longform_samples = np.zeros((
@@ -57,34 +57,15 @@ def compute_accuracy(X, y, Xtest, ytest):
 
     return train_score, test_score 
 
-
 # Training dat
 #X = np.load("../data/processed/all_0130.npy")
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
-x_train = np.expand_dims(x_train, -1)[0:40000]/255
-x_test= np.expand_dims(x_test, -1)/255
-
-"""
-#Labelled data for testing
-with h5py.File("../data/images.h5", "r") as fo:
-    train_targets = np.array(fo["train_targets"])
-    test_targets = np.array(fo["test_targets"])
-
-train_data = np.load("../data/processed/train.npy")
-test_data = np.load("../data/processed/test.npy")
-
-train_test = np.concatenate((train_data, test_data))
-"""
 
 n_layers = 3
-filter_architecture = [32, 64, 128]
-kernel_arcitecture = [5, 5, 3,]
-strides_architecture = [1, 1, 1,]
-pool_architecture = [0, 0, 0]
-epochs = 2000
-
-latent_dim = 10
-batch_size = 200
+filter_architecture = [32, 64, 128, 128]
+#kernel_architecture = [19, 19, 17]
+strides_architecture = [2, 2, 2, 2]
+pool_architecture = [0, 0, 0, 0]
+n_clust = 3
 
 mode_config = {
         "simulated_mode": False,
@@ -92,39 +73,81 @@ mode_config = {
         "include_KL": False,
         "include_MMD": False,
         "include_KM": True,
-
+        "batchnorm":False
         }
 
 clustering_config = {
-        "n_clusters":10,
+        "n_clusters":n_clust,
         "alpha":1,
         "delta":0.01,
         "pretrain_simulated":False,
-        "pretrain_epochs": 200,
+        "pretrain_epochs": 90,
         "update_interval": 140,
         }
+
+data = "real"
+
+if data == "mnist":
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    x_train = np.expand_dims(x_train, -1)/255
+    x_test= np.expand_dims(x_test, -1)/255
+    x_tot = np.concatenate([x_train, x_test])
+    kernel_architecture = [5, 5, 3]
+    n_clust = 10
+if data == "simulated":
+    train_data = np.load("../data/simulated/pr_train_simulated.npy")
+    test_data = np.load("../data/simulated/pr_test_simulated.npy")
+    test_targets = np.load("../data/simulated/test_targets.npy")
+    x_train = train_data
+    x_test = test_data
+    y_test = test_targets
+    kernel_architecture = [5, 5, 3, 3]
+    filter_architecture = [16, 32, 64, 64]
+    clustering_config["pretrain_epochs"] = 20
+    clustering_config["n_clusters"] = 2
+    n_layers = 4
+    #kernel_architecture = [19, 19, 17]
+if data == "real":
+    #Labelled data for testing
+    with h5py.File("../data/images.h5", "r") as fo:
+        train_targets = np.array(fo["train_targets"])
+        test_targets = np.array(fo["test_targets"])
+    all_0130 = np.load("../data/processed/all_0130.npy")
+    x_train = all_0130
+    #train_data = np.load("../data/processed/train.npy")
+    test_data = np.load("../data/processed/test.npy")
+    train_data = np.load("../data/processed/train.npy")
+    x_test = train_data
+    y_test = train_targets 
+    kernel_architecture = [7, 7, 5, 5]
+    filter_architecture = [16, 32, 64, 64]
+    clustering_config["pretrain_epochs"] = 90
+    clustering_config["n_clusters"] = 3
+    n_layers = 4
+
+epochs = 2000
+
+latent_dim = 10
+batch_size = 256
 
 cvae = ConVae(
         n_layers,
         filter_architecture,
-        kernel_arcitecture,
+        kernel_architecture,
         strides_architecture,
         pool_architecture,
         latent_dim,
         x_train,
+        #all_0130,
         beta=0.9,
-        sampling_dim=10,
+        #sampling_dim=100,
         clustering_config=clustering_config,
         mode_config=mode_config,
-        labelled_data=[x_test, y_test],
+        #labelled_data=[test_data, test_targets],
+        labelled_data=[x_test, y_test]
         )
 
-cvae.p_f = np.random.normal(size=(x_train.shape[0], 10, ))
-
-with tf.variable_scope("clusters"):
-    cvae.clusters = tf.Variable(np.random.normal(size=(10, latent_dim)).astype(np.float32))
-
-graph_kwds = {"activation":"relu", "output_activation":"relu"}
+graph_kwds = {"activation":"relu", "output_activation":None}
 loss_kwds = {"reconst_loss": "mse"}
 cvae.compile_model(graph_kwds, loss_kwds)
 
@@ -134,7 +157,7 @@ opt_kwds = {
     "beta1": 0.9,
 }
 
-cvae.compute_gradients(opt, opt_args, opt_kwds)
+cvae.compute_gradients(opt,)
 
 sess = tf.InteractiveSession()
 lx, lz = cvae.train(

@@ -25,24 +25,23 @@ class ConVaeGenerator(ModelGenerator):
         self.train_clustering = clustering
         self.labelled_data = labelled_data
         self.n_classes = n_classes
-        self.max_layers = 10
+        self.max_layers = 7
         self.latent_types = ["include_KL", "include_MMD", None]
         self.activations = ["relu", "tanh", "sigmoid", None]
         self.etas = np.logspace(-5, -1, 5)
         self.betas = np.logspace(0, 5, 6)
         self.ld = [3, 10, 20, 50, 100]
-        self.sd = [10, 50, 150]
+        #self.sd = [10, 50, 150]
         self.X = X
 
     def sample_hyperparameters(self,):
         config = []
-        n_layers = np.random.randint(4, self.max_layers)
+        n_layers = np.random.randint(3, self.max_layers)
         #n_layers = 7
         valid_conv_out = 1
         input_dim = self.X.shape[1]
-        while valid_conv_out == 1:
-            conv_config = self._generate_conv_config(n_layers)
-            valid_conv_out = self.conv_out(conv_config, input_dim)
+        conv_config = self._generate_conv_config(n_layers)
+        valid_conv_out = self.conv_out(conv_config, input_dim)
         parameters_config = self._generate_param_config()
         n_latent_types = len(self.latent_types)
         mode_config = {
@@ -79,19 +78,19 @@ class ConVaeGenerator(ModelGenerator):
         beta1 = np.random.uniform(0.2, 0.96)
         beta2 = 0.99
         latent_dim = self.ld[np.random.randint(0, len(self.ld))]
-        sampling_dim = self.sd[np.random.randint(0, len(self.sd))]
+        #sampling_dim = self.sd[np.random.randint(0, len(self.sd))]
         parameters_config = [
                 beta,
                 eta,
                 beta1,
                 beta2,
                 latent_dim,
-                sampling_dim,
+                #sampling_dim,
                 ]
         return parameters_config
 
     def _generate_conv_config(self, n_layers):
-        strides_arcitecture = [1]*n_layers#np.random.randint(1, 3, size=n_layers)
+        strides_arcitecture = [2]*n_layers#np.random.randint(1, 3, size=n_layers)
         if self.architecture == "vgg":
             kernel_architecture = [3]*n_layers
             filter_architecture = self._make_vgg_filters(kernel_architecture)
@@ -100,7 +99,6 @@ class ConVaeGenerator(ModelGenerator):
             kernel_architecture = self._make_kernel_config(n_layers)
             filter_architecture = self._make_filter_config(kernel_architecture)
             pooling_config = self._make_pooling_config(n_layers)
-            print(pooling_config)
 
         conv_config = [
                 filter_architecture,
@@ -124,7 +122,8 @@ class ConVaeGenerator(ModelGenerator):
         return filter_architecture 
 
     def _make_pooling_config(self, n_layers):
-        pooling_conf = np.random.randint(0, 2, n_layers)
+        #pooling_conf = np.random.randint(0, 2, n_layers)
+        pooling_conf = [0]*n_layers
         return pooling_conf
 
     def _make_vgg_pooling_config(self, n_layers):
@@ -187,7 +186,7 @@ class ConVaeGenerator(ModelGenerator):
         return filter_architecture
 
     def _make_kernel_config(self, n_layers):
-        kernel_sizes = np.array([11, 9, 5, 3])
+        kernel_sizes = np.array([11, 9, 7, 5, 3])
         available_layers = n_layers
         n_of_each_kernel = []
 
@@ -207,8 +206,8 @@ class ConVaeGenerator(ModelGenerator):
 
     @classmethod
     def conv_out(self, conv_config, w):
-        def o(w, k, s): return np.floor((w - k + 2*0)/s + 1)
-        def to(w, k, s): return np.ceil(w*s + np.max([k-s,0]))
+        def o(w, k, s): return np.floor((w - k + (k-1)/2)/s + 1)
+        def to(w, k, s): return np.ceil((w-1)*s + 1)
 
         filter_a = conv_config[0]
         kernel_a = conv_config[1]
@@ -254,7 +253,7 @@ class ConVaeGenerator(ModelGenerator):
         beta1 = parameters_config[2]
         beta2 = parameters_config[3]
         latent_dim = parameters_config[4]
-        sampling_dim = parameters_config[5]
+        #sampling_dim = parameters_config[5]
 
         mode_config = config[2]
         clustering_config = config[3]
@@ -268,7 +267,7 @@ class ConVaeGenerator(ModelGenerator):
                     latent_dim,
                     self.X,
                     beta=beta,
-                    sampling_dim=sampling_dim,
+                    #sampling_dim=sampling_dim,
                     mode_config=mode_config,
                     clustering_config=clustering_config,
                     labelled_data=self.labelled_data,

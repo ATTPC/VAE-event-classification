@@ -18,14 +18,12 @@ class BatchManager:
 
         else: 
             ind = np.random.choice(self.available, self.nSamples, replace=False)
-            
 
         for i in ind:
             self.available.remove(i)
 
         self.nSamples = len(self.available)
         return ind
-        
         #return self.X[ind].reshape(self.batch_size, self.n_pixels)
 
 

@@ -138,6 +138,26 @@ class LatentModel:
         all_lx = np.zeros(epochs)
         smooth_loss = np.zeros(epochs)
         #writer = tf.summary.FileWriter("../loss_records/tensorboard/pretrain", sess.graph)
+        to_feed = np.reshape(self.X, (self.X.shape[0], -1))
+        earlystop = tf.keras.callbacks.EarlyStopping(
+             monitor='loss',
+             patience=2,
+             min_delta=1e-3
+             )
+        self.cae.fit(
+                to_feed,
+                to_feed,
+                batch_size=minibatch_size,
+                epochs=epochs,
+                callbacks=[earlystop,]
+                )
+
+        json_model = self.cae.to_json()
+        with open("../models/cae.json", "w") as fo:
+            fo.write(json_model)
+        self.cae.save_weights("../models/cae.weights.h5")
+        return
+
         for i in range(epochs):
             bm = BatchManager(self.X.shape[0], minibatch_size)
             lxs = []
@@ -145,7 +165,8 @@ class LatentModel:
                 n_bi = bi.shape[0]
                 to_run = self.X[bi].reshape((n_bi, self.n_input))
                 feed_dict = {self.x: to_run}
-                lx, _ = sess.run(self.pretrain_fetch, feed_dict)
+                #lx, _ = sess.run(self.pretrain_fetch, feed_dict)
+                lx = self.cae.train_on_batch(to_run, to_run)
                 lxs.append(lx)
 
             cur_lx = np.average(lxs)
@@ -259,6 +280,7 @@ class LatentModel:
         print("RUN NR", run)
 
         K.set_session(sess)
+        #tf.keras.set_session(sess)
         self.performance = tf.placeholder(tf.float32, shape=(), name="score")
         tf.summary.scalar("performance", self.performance)
         self.merged = tf.summary.merge_all()
@@ -477,7 +499,7 @@ class LatentModel:
             performance (float): measure of how good the clustering is, if labelled data is included then use ARS
 
         """
-
+        """
         km = KMeans(
             n_clusters=self.n_clusters,
             n_init=1000,
@@ -498,15 +520,16 @@ class LatentModel:
             max_iter=1000,
             n_jobs=10,
                 )
+        predef_km.fit(z)
 
         to_use = km if km.inertia_ < predef_km.inertia_ else predef_km
         self.clusters.load(to_use.cluster_centers_, sess)
+        """
 
         tot_samp = self.X.shape[0]
         q = np.zeros((tot_samp, self.n_clusters))
         clst_bm = BatchManager(tot_samp, 100)
         retval = 0
-
         for bi in clst_bm:
             n_bi = bi.shape[0]
             to_pred = self.X[bi].reshape((n_bi, self.n_input))
@@ -635,7 +658,7 @@ class LatentModel:
         print("Training K-means..... ")
         km = KMeans(
             n_clusters=self.n_clusters,
-            n_init=1000,
+            n_init=100,
             max_iter=1000,
             n_jobs=10,
         )
@@ -798,10 +821,12 @@ class LatentModel:
         optimizer = optimizer_class(*opt_args, **opt_kwds)
         self.optimizer = optimizer
         grads = optimizer.compute_gradients(self.cost)
-
+        
+        """
         for i, (g, v) in enumerate(grads):
             if g is not None:
                 grads[i] = (tf.clip_by_norm(g, 5), v)
+        """
 
         self.train_op = optimizer.apply_gradients(grads)
 
@@ -817,10 +842,11 @@ class LatentModel:
         if self.include_KM:
             lx_optimizer = tf.train.AdamOptimizer(0.0001, beta1=0.5)
             lx_grads = lx_optimizer.compute_gradients(self.Lx)
-
+            """
             for i, (g, v) in enumerate(lx_grads):
                 if g is not None:
                     lx_grads[i] = (tf.clip_by_norm(g, 5), v)
+            """
 
             lx_train_op = lx_optimizer.apply_gradients(lx_grads)
             self.pretrain_fetch = [self.Lx, lx_train_op]
@@ -833,10 +859,6 @@ class LatentModel:
     def compute_classifier_cost(self, optimizer):
         classifier_grads = optimizer.compute_gradients(
             self.classifier_cost)
-
-        for i, (g, v) in enumerate(classifier_grads):
-            if g is not None:
-                classifier_grads[i] = (tf.clip_by_norm(g, 5), v)
 
         self.classifier_op = optimizer.apply_gradients(classifier_grads)
         clf_fetches = [self.classifier_cost, self.clf_acc, self.classifier_op]
