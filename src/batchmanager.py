@@ -4,25 +4,35 @@ import numpy as np
 class BatchManager:
 
     def __init__(self, nSamples, batch_size):
-        self.available = list(np.arange(0, nSamples))
-        self.nSamples = nSamples
+        self.available = np.arange(0, nSamples)
         self.batch_size = batch_size
+        #self.remainder = self.nSamples % self.batch_size
+        self.n = nSamples // self.batch_size
+        #self.batch_multip = self.n*self.batch_size 
+        self.i = 0
+        self.stopiter = False
+        self.indices = np.random.choice(
+                self.available, 
+                size=(self.n, self.batch_size),
+                replace=False
+                )
 
     def __next__(self, ):
 
-        if self.nSamples == 0:
+        if self.stopiter:
             raise StopIteration()
-
-        if self.nSamples > self.batch_size:
-            ind = np.random.choice(self.available, self.batch_size, replace=False)
-
+        elif self.i < self.n:
+            #ind = np.random.choice(self.available, self.batch_size, replace=False)
+            ind = self.indices[self.i]
+            self.i += 1
         else: 
-            ind = np.random.choice(self.available, self.nSamples, replace=False)
+            #ind = np.random.choice(self.available, self.nSamples, replace=False)
+            ind = np.setdiff1d(self.available, self.indices.flatten())
+            self.stopiter = True
 
-        for i in ind:
-            self.available.remove(i)
+        #self.available = np.delete(self.available, ind)
+        #self.nSamples = self.available.shape[0]
 
-        self.nSamples = len(self.available)
         return ind
         #return self.X[ind].reshape(self.batch_size, self.n_pixels)
 
