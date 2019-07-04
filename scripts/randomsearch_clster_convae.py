@@ -10,8 +10,8 @@ from randomsearch import RandomSearch
 
 from randomsearch_run import run
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-data = "real"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+data = "clean"
 
 print("PID", os.getpid())
 
@@ -21,7 +21,7 @@ if data=="simulated":
 
     y_train = np.load("../data/simulated/train_targets.npy")
     y_test = np.load("../data/simulated/test_targets.npy")
-if data == "real":
+elif data == "real":
     #Labelled data for testing
     with h5py.File("../data/images.h5", "r") as fo:
         train_targets = np.array(fo["train_targets"])
@@ -34,6 +34,13 @@ if data == "real":
     train_data = np.load("../data/processed/train.npy")
     x_test = train_data
     y_test = train_targets 
+elif data=="clean":
+    run_130 = np.load("../data/clean/images/run_0130_label_False_size_80.npy")
+    run_150 = np.load("../data/clean/images/run_0150_label_False_size_80.npy")
+    run_190 = np.load("../data/clean/images/run_0150_label_False_size_80.npy")
+    x_train = np.concatenate([run_130, run_150, run_190])
+    x_test = np.load("../data/clean/images/train_size_80.npy")
+    y_test = np.load("../data/clean/targets/train_targets_size_80.npy")
 
 n = 1000
 try:

@@ -61,10 +61,10 @@ def compute_accuracy(X, y, Xtest, ytest):
 #X = np.load("../data/processed/all_0130.npy")
 
 n_layers = 3
-filter_architecture = [32, 64, 128, 128]
+filter_architecture = [32, 64, 128,]
 #kernel_architecture = [19, 19, 17]
-strides_architecture = [2, 2, 2, 2]
-pool_architecture = [0, 0, 0, 0]
+strides_architecture = [2, 2, 2, ]
+pool_architecture = [0, 0, 0, ]
 n_clust = 3
 
 mode_config = {
@@ -81,11 +81,11 @@ clustering_config = {
         "alpha":1,
         "delta":0.01,
         "pretrain_simulated":False,
-        "pretrain_epochs": 90,
+        "pretrain_epochs": 200,
         "update_interval": 140,
         }
 
-data = "real"
+data = "clean"
 
 if data == "mnist":
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -107,6 +107,23 @@ if data == "simulated":
     clustering_config["n_clusters"] = 2
     n_layers = 4
     #kernel_architecture = [19, 19, 17]
+elif data=="clean":
+    run_130 = np.load("../data/clean/images/run_0130_label_False_size_49.npy")[:, 1:, 1:, :]
+    run_150 = np.load("../data/clean/images/run_0150_label_False_size_49.npy")[:, 1:, 1:, :]
+    #run_170 = np.load("../data/clean/images/run_0170_label_False_size_50.npy")[:, 1:-1, 1:-1, :]
+    run_190 = np.load("../data/clean/images/run_0190_label_False_size_49.npy")[:, 1:, 1:, :]
+    run_210 = np.load("../data/clean/images/run_0210_label_False_size_49.npy")[:, 1:, 1:, :]
+    x_train = np.concatenate([run_130, run_150,  run_190, run_210])
+    x_test = np.load("../data/clean/images/train_size_49.npy")[:, 1:, 1:, :]
+    y_test = np.load("../data/clean/targets/train_targets_size_49.npy")
+    y_test = np.squeeze(y_test)
+    kernel_architecture = [5, 3, 3, 3]
+    filter_architecture = [32, 64, 128, 128]
+    strides_architecture += [2,]
+    pool_architecture += [0,]
+    clustering_config["pretrain_epochs"] = 200
+    clustering_config["n_clusters"] = 3
+    n_layers = 3
 if data == "real":
     #Labelled data for testing
     with h5py.File("../data/images.h5", "r") as fo:
@@ -120,7 +137,7 @@ if data == "real":
     x_test = train_data
     y_test = train_targets 
     kernel_architecture = [7, 7, 5, 5]
-    filter_architecture = [16, 32, 64, 64]
+    filter_architecture = [32, 64, 64, 128]
     clustering_config["pretrain_epochs"] = 90
     clustering_config["n_clusters"] = 3
     n_layers = 4
@@ -160,6 +177,7 @@ opt_kwds = {
 cvae.compute_gradients(opt,)
 
 sess = tf.InteractiveSession()
+
 lx, lz = cvae.train(
         sess,
         epochs,

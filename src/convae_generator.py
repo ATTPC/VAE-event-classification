@@ -27,9 +27,9 @@ class ConVaeGenerator(ModelGenerator):
         self.n_classes = n_classes
         self.max_layers = 7
         self.latent_types = ["include_KL", "include_MMD", None]
-        self.activations = ["relu", "tanh", "sigmoid", None]
+        self.activations = ["relu", "lrelu"]
         self.etas = np.logspace(-5, -1, 5)
-        self.betas = np.logspace(0, 5, 6)
+        self.betas = np.linspace(0, 1, 10)
         self.ld = [3, 10, 20, 50, 100]
         #self.sd = [10, 50, 150]
         self.X = X
@@ -146,7 +146,8 @@ class ConVaeGenerator(ModelGenerator):
         pretrain_epochs = pre_epochs[np.random.randint(0, len(pre_epochs))]
         update_freq = [1, 50, 150, 200]
         update_interval = update_freq[np.random.randint(0, len(update_freq))]
-        pretrain_sim = np.random.randint(0, 2)
+        #pretrain_sim = np.random.randint(0, 2)
+        pretrain_sim = 0
         if self.n_classes == 2:
             pretrain_sim = 0
 
@@ -281,10 +282,12 @@ class ConVaeGenerator(ModelGenerator):
                 }
 
         activation = self.activations[np.random.randint(0, len(self.activations))]
+        #activation = "relu"
         graph_kwds = {
                 "activation":activation
                 }
-        model.compile_model(graph_kwds=graph_kwds)
+        loss_kwds = {"reconst_loss":"mse"}
+        model.compile_model(graph_kwds=graph_kwds, loss_kwds=loss_kwds)
         model.compute_gradients(opt, opt_args, opt_kwds)
         return model, config
 

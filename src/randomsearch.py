@@ -3,6 +3,7 @@ import numpy as np
 import os 
 import sys
 import tensorflow as tf
+from tensorflow.python.framework.errors_impl import ResourceExhaustedError
 sys.path.append("../scripts")
 
 class RandomSearch:
@@ -37,9 +38,9 @@ class RandomSearch:
 
     def search(self, n, batch_size, save_dir):
         try:
-            os.mkdir("save_dir")
+            os.mkdir(save_dir)
         except FileExistsError:
-            pass
+            raise FileExistsError("That run has already been performed, please specify  another")
         to_save = [
                 self.model_creator.hyperparam_vals,
                 self.model_creator.loss_vals,
@@ -60,7 +61,12 @@ class RandomSearch:
                                         self.y_t
                                         )
                 self.savefiles(to_save, names, save_dir)
+                self.model_creator.sess.close()
             except tf.errors.InvalidArgumentError:
+                self.model_creator.sess.close()
+                continue
+            except ResourceExhaustedError:
+                self.model_creator.sess.close()
                 continue
 
     def savefiles(self, to_save, names, save_dir):

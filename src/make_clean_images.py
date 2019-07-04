@@ -12,14 +12,13 @@ print("Matplot backend",  matplotlib.get_backend())
 
 CLOCK = 12.5
 DRIFT_VEL = 5.2
-point_cutoff = 50
+point_cutoff = 20
 
 
 def filtering(xyz):
-    filtered_1 = xyz[xyz[:, 6] < 45]
+    filtered_1 = xyz[xyz[:, 6] < 100]
     filtered_2 = filtered_1[(filtered_1[:, 2]*DRIFT_VEL/CLOCK) < 1250.]
-    filtered_3 = filtered_2[filtered_2[:, 5] > 1]
-
+    filtered_3 = filtered_2[filtered_2[:, 5] > 0.001]
     return filtered_3
 
 
@@ -127,8 +126,7 @@ def make_images(projection, labeled):
         for i in range(len(normalized_charge_events)):
             events[i][0][:, 3] = normalized_charge_events[i]
 
-        image_size = 80
-
+        image_size = 49
         images = np.empty((len(events), image_size, image_size, 1), dtype=np.uint8)
         targets = np.empty(len(events), dtype=np.uint8)
 
@@ -182,8 +180,11 @@ def make_images(projection, labeled):
                     ), images/255)
 
         if labeled:
-            np.save("../data/clean/targets/run_{}_targets.npy".format(run), targets)
+            np.save(
+                    "../data/clean/targets/run_{}_targets_size_{}.npy".format(run, image_size),
+                    targets
+                    )
 
 
 if __name__ == "__main__":
-    make_images("xy", True)
+    make_images("xy", False)

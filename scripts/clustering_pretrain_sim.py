@@ -12,7 +12,7 @@ sys.path.append("../src")
 from convolutional_VAE import ConVae
 
 print("PID:", os.getpid())
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = ["0", "1"]
 
 X_sim = np.load("../data/simulated/pr_test_simulated.npy")[0:1000]
 y_sim = np.load("../data/simulated/test_targets.npy")[0:1000]

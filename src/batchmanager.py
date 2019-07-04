@@ -6,7 +6,7 @@ class BatchManager:
     def __init__(self, nSamples, batch_size):
         self.available = np.arange(0, nSamples)
         self.batch_size = batch_size
-        #self.remainder = self.nSamples % self.batch_size
+        self.remainder = nSamples % self.batch_size
         self.n = nSamples // self.batch_size
         #self.batch_multip = self.n*self.batch_size 
         self.i = 0
@@ -27,8 +27,11 @@ class BatchManager:
             self.i += 1
         else: 
             #ind = np.random.choice(self.available, self.nSamples, replace=False)
+            if self.remainder == 0:
+                raise StopIteration()
             ind = np.setdiff1d(self.available, self.indices.flatten())
             self.stopiter = True
+
 
         #self.available = np.delete(self.available, ind)
         #self.nSamples = self.available.shape[0]

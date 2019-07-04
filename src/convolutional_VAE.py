@@ -98,7 +98,7 @@ class ConVae(LatentModel):
                 "relu": tf.keras.layers.ReLU,
                 "lrelu": tf.keras.layers.LeakyReLU,
                 "tanh": Lambda(tf.keras.activations.tanh),
-                "sigmoid": Lambda(tf.keras.activations.sigmoid)
+                "sigmoid": Lambda(tf.keras.activations.sigmoid),
                 }
 
         self.x = tf.keras.layers.Input(shape=(self.n_input,))
@@ -110,13 +110,13 @@ class ConVae(LatentModel):
 
         k_reg = kernel_reg(kernel_reg_strength)
         b_reg = bias_reg(bias_reg_strenght)
-
+        pow_2 = self.H % 2**self.n_layers != 0
         for i in range(self.n_layers):
             with tf.name_scope("conv_"+str(i)):
                 filters = self.filter_arcitecture[i]
                 kernel_size = self.kernel_architecture[i]
                 strides = self.strides_architecture[i]
-                if i == self.n_layers-1 and self.H % 8 != 0:
+                if i == 0 and pow_2:
                     padding= "valid"
                 else:
                     padding= "same"
@@ -178,7 +178,6 @@ class ConVae(LatentModel):
         else:
             sample = Dense(
                     self.latent_dim,
-                    activation=activation,
                     )(h1)
 
         if self.include_KM:
@@ -199,18 +198,22 @@ class ConVae(LatentModel):
 
         # %%
         deconv_shape = int(self.x_img.get_shape()[1])
-        for s in self.strides_architecture:
+        for i in range(self.n_layers):
+            s = self.strides_architecture[i]
             deconv_shape /= s
         deconv_shape = int(deconv_shape)
         full_deconv_shape = deconv_shape**2 * self.filter_arcitecture[-1]
 
-        de1 = Dense(
-                full_deconv_shape,
-                activation=activation)(sample) 
+        de1 = Dense(full_deconv_shape,)(sample) 
         with tf.name_scope("dense"):
             if self.batchnorm:
                 de1 = BatchNormalization()(de1)
             self.variable_summary(de1)
+
+        if activation == "lrelu":
+            de1 = activations[activation](0.3)(de1)
+        else:
+            de1 = activations[activation]()(de1)
 
         de1 = tf.keras.layers.Reshape((
                     deconv_shape,
@@ -227,7 +230,7 @@ class ConVae(LatentModel):
                 else:
                     filters = self.filter_arcitecture[i-1]
 
-                if i == self.n_layers-1 and self.H % 8 != 0:
+                if i == self.n_layers-1 and pow_2:
                     padding= "valid"
                 else:
                     padding= "same"
@@ -242,16 +245,16 @@ class ConVae(LatentModel):
                                     filters=filters,
                                     kernel_size=(kernel_size, kernel_size),
                                     strides=(strides, strides),
-                                    #output_padding=(strides-1, strides-1),
                                     padding=padding,
                                     use_bias=True,
                                     #kernel_regularizer=k_reg,
                                     #bias_regularizer=b_reg,
                                     )
                 de1 = layer(de1)
-
                 if activation == None:
                     de1 = de1
+                if i == 0:
+                    continue
                 elif activation=="relu" or activation=="lrelu":
                     a = activations[activation]
                     if activation == "relu":
@@ -299,9 +302,10 @@ class ConVae(LatentModel):
         decoder_out = tf.keras.layers.Reshape((self.n_input,))(decoder_out)
 
         self.cae = Model(inputs=self.x, outputs=decoder_out)
-        self.dcec = Model(inputs=self.x, outputs=[decoder_out, self.q])
         print(self.cae.summary())
-        print(self.dcec.summary())
+        if self.include_KM:
+            self.dcec = Model(inputs=self.x, outputs=[decoder_out, self.q])
+            print(self.dcec.summary())
 
         self.output = decoder_out
         self.canvas_seq = [decoder_out, ]
@@ -317,7 +321,6 @@ class ConVae(LatentModel):
 
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
 
-        self.cae.compile(optimizer="adam", loss="mse")
 
         x_recons = self.output
         if reconst_loss==None:
@@ -364,11 +367,6 @@ class ConVae(LatentModel):
 
         if self.include_KM:
             self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
-            self.dcec.compile(
-                        optimizer="adam",
-                        loss=["mse", "kld"],
-                        loss_weights=[self.beta, (1-self.beta)],
-                        )
 
             if self.include_MMD:
                 mmd = self.compute_mmd(self.p, self.q)

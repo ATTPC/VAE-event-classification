@@ -1,8 +1,10 @@
 import tensorflow as tf
+from tensorflow.python.framework.errors_impl import ResourceExhaustedError
 import numpy as np
 import sys
 import signal
 import os
+import glob
 
 from keras import backend as K
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
@@ -142,13 +144,14 @@ class LatentModel:
         earlystop = tf.keras.callbacks.EarlyStopping(
              monitor='loss',
              patience=2,
-             min_delta=1e-3
+             min_delta=1e-7
              )
-        self.cae.fit(
+        history = self.cae.fit(
                 to_feed,
                 to_feed,
                 batch_size=minibatch_size,
                 epochs=epochs,
+                shuffle=True,
                 callbacks=[earlystop,]
                 )
 
@@ -156,7 +159,7 @@ class LatentModel:
         with open("../models/cae.json", "w") as fo:
             fo.write(json_model)
         self.cae.save_weights("../models/cae.weights.h5")
-        return
+        return history
 
         for i in range(epochs):
             bm = BatchManager(self.X.shape[0], minibatch_size)
@@ -278,6 +281,10 @@ class LatentModel:
             print("cannot train before model is compiled and gradients are computed")
             return
         print("RUN NR", run)
+        if run==0:
+            files = glob.glob("../loss_records/tensorboard/run_{}/*".format(run))
+            for f in files:
+                os.remove(f)
 
         K.set_session(sess)
         #tf.keras.set_session(sess)
@@ -310,6 +317,7 @@ class LatentModel:
         if self.include_KM:
             self.pretrain_clustering(sess, minibatch_size)
 
+        self.prev_loss = 0
         print("starting training..")
         for i in range(epochs):
             if self.restore_mode:
@@ -341,8 +349,6 @@ class LatentModel:
                         return all_lx, all_lz
                     if performance < 0.1:
                         return all_lx, all_lz
-            else:
-                performance = np.average([Lxs[-1], Lzs[-1]])
 
             """
             Epoch train iteration
@@ -375,9 +381,10 @@ class LatentModel:
                 all_lz[i] = tmp
             except ValueError:
                 all_lz[i] = 1e5
-
             all_lx[i] = np.average(Lxs)
-
+            
+            if not self.include_KM:
+                performance = np.average([Lxs[-1], Lzs[-1]])
             """Compute classifier performance """
 
             if self.train_classifier:
@@ -413,7 +420,8 @@ class LatentModel:
                 feed_dict[self.performance] = performance
                 summary = sess.run(self.merged, feed_dict=feed_dict)
                 writer.add_summary(summary, i)
-                self.evaluate_cluster(sess, i)
+                if self.include_KM:
+                    self.evaluate_cluster(sess, i)
 
                 if earlystopping:
                     to_earlystop = self.earlystopping(
@@ -658,7 +666,7 @@ class LatentModel:
         print("Training K-means..... ")
         km = KMeans(
             n_clusters=self.n_clusters,
-            n_init=100,
+            n_init=20,
             max_iter=1000,
             n_jobs=10,
         )
@@ -821,7 +829,13 @@ class LatentModel:
         optimizer = optimizer_class(*opt_args, **opt_kwds)
         self.optimizer = optimizer
         grads = optimizer.compute_gradients(self.cost)
-        
+        if self.include_KM:
+            self.cae.compile(optimizer=optimizer, loss="mse")
+            self.dcec.compile(
+                        optimizer="adam",
+                        loss=["mse", "kld"],
+                        loss_weights=[self.beta, (1-self.beta)],
+                        )
         """
         for i, (g, v) in enumerate(grads):
             if g is not None:
@@ -1084,7 +1098,7 @@ class LatentModel:
             decoder_states = np.load(dec_state_fn)
             latent_samples = np.load(latent_fn)
 
-        dec_state = self.decoder.zero_state(n_samples, tf.float32)
+        #dec_state = self.decoder.zero_state(n_samples, tf.float32)
         h_dec = tf.zeros((n_samples, self.dec_size))
         c_prev = tf.zeros((n_samples, self.n_input))
 
