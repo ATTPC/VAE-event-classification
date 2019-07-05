@@ -48,9 +48,7 @@ class ConVae(LatentModel):
         super().__init__(X, latent_dim, beta, mode_config)
         self.use_attention = False
         self.T = 1
-
         self.labelled_data = labelled_data
-
         self.n_layers = n_layers
 
         self.filter_arcitecture = filter_arcitecture
@@ -66,7 +64,6 @@ class ConVae(LatentModel):
 
         self.latent_dim = latent_dim
         self.sampling_dim = sampling_dim
-
         self.train_classifier = train_classifier
 
     def _ModelGraph(
@@ -95,8 +92,8 @@ class ConVae(LatentModel):
                 }
         """
         activations = {
-                "relu": tf.keras.layers.ReLU,
-                "lrelu": tf.keras.layers.LeakyReLU,
+                "relu": tf.keras.layers.ReLU(),
+                "lrelu": tf.keras.layers.LeakyReLU(0.1),
                 "tanh": Lambda(tf.keras.activations.tanh),
                 "sigmoid": Lambda(tf.keras.activations.sigmoid),
                 }
@@ -135,10 +132,7 @@ class ConVae(LatentModel):
                    pass 
                 elif activation=="relu" or activation=="lrelu":
                     a = activations[activation]
-                    if activation == "relu":
-                        h1 = a()(h1)
-                    else: 
-                        h1 = a(0.1)(h1)
+                    h1 = a(h1)
                     with tf.name_scope("batch_norm"):
                         if self.batchnorm:
                             h1 = BatchNormalization(
@@ -169,8 +163,7 @@ class ConVae(LatentModel):
 
         if self.include_KL:
             self.mean = Dense(self.latent_dim)(h1)
-            self.var = Dense(self.latent_dim, activation=activation)(h1)
-
+            self.var = Dense(self.latent_dim)(h1)
             sample = Lambda(
                         self.sampling,
                         output_shape=(self.latent_dim,),
@@ -203,18 +196,14 @@ class ConVae(LatentModel):
             deconv_shape /= s
         deconv_shape = int(deconv_shape)
         full_deconv_shape = deconv_shape**2 * self.filter_arcitecture[-1]
-
         de1 = Dense(full_deconv_shape,)(sample) 
+
         with tf.name_scope("dense"):
             if self.batchnorm:
                 de1 = BatchNormalization()(de1)
             self.variable_summary(de1)
 
-        if activation == "lrelu":
-            de1 = activations[activation](0.3)(de1)
-        else:
-            de1 = activations[activation]()(de1)
-
+        de1 = activations[activation](de1)
         de1 = tf.keras.layers.Reshape((
                     deconv_shape,
                     deconv_shape,
@@ -229,7 +218,6 @@ class ConVae(LatentModel):
                     filters = self.ch
                 else:
                     filters = self.filter_arcitecture[i-1]
-
                 if i == self.n_layers-1 and pow_2:
                     padding= "valid"
                 else:
@@ -257,10 +245,7 @@ class ConVae(LatentModel):
                     continue
                 elif activation=="relu" or activation=="lrelu":
                     a = activations[activation]
-                    if activation == "relu":
-                        de1 = a()(de1)
-                    else: 
-                        de1 = a(0.1)(de1)
+                    de1 = a(de1)
                     with tf.name_scope("batch_norm"):
                         if self.batchnorm:
                             de1 = tf.keras.layers.BatchNormalization(
@@ -298,35 +283,33 @@ class ConVae(LatentModel):
                 decoder_out = de1
             else:
                 decoder_out = activations[output_activation](de1)
-        print("FINAL O", decoder_out.get_shape())
+        #print("FINAL O", decoder_out.get_shape())
         decoder_out = tf.keras.layers.Reshape((self.n_input,))(decoder_out)
 
         self.cae = Model(inputs=self.x, outputs=decoder_out)
-        print(self.cae.summary())
+        #print(self.cae.summary())
         if self.include_KM:
             self.dcec = Model(inputs=self.x, outputs=[decoder_out, self.q])
-            print(self.dcec.summary())
+            #print(self.dcec.summary())
 
         self.output = decoder_out
         self.canvas_seq = [decoder_out, ]
 
         #self.decoder = Model(latent_inputs, decoder_out, name="decoder")
-
         #outputs = self.decoder(self.encoder(in_layer)[2])
-
         #self.vae = Model(in_layer, outputs, name='vae')
-
         #self.encoder.summary()
         #self.decoder.summary()
 
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
-
-
         x_recons = self.output
         if reconst_loss==None:
             reconst_loss = self.binary_crossentropy
-            self.Lx = tf.reduce_mean(tf.reduce_sum(
-                                        reconst_loss(self.x, x_recons), 1))
+            self.Lx = tf.reduce_mean(
+                            tf.reduce_sum(
+                                    reconst_loss(self.x, x_recons),
+                                    1)
+                            )
         elif reconst_loss=="mse":
             self.Lx = tf.losses.mean_squared_error(self.x, x_recons)
 
@@ -345,8 +328,7 @@ class ConVae(LatentModel):
             KL_loss = tf.reduce_sum(mu_sq + sigma_exp - self.var - 1, 1)
             KL = self.beta * 0.5 * tf.reduce_sum(KL_loss)
             self.Lz = KL
-
-        if self.include_MMD:
+        elif self.include_MMD:
             z = self.z_seq[0]
             n = self.batch_size
 
@@ -364,21 +346,21 @@ class ConVae(LatentModel):
             #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
             mmd = self.compute_mmd(ref, z)
             self.Lz = self.beta*mmd
-
-        if self.include_KM:
+        elif self.include_KM:
             self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
-
             if self.include_MMD:
                 mmd = self.compute_mmd(self.p, self.q)
                 self.Lz = self.beta*mmd
             else:
                 self.Lz = tf.keras.metrics.kullback_leibler_divergence(self.p, self.q)
                 self.Lz = tf.reduce_mean(self.Lz)
-
         else:
             self.Lz = self.Lx*0
 
-        self.cost = self.beta*self.Lx + (1-self.beta)*self.Lz
+        if self.include_KM:
+            self.cost = self.beta*self.Lx + (1-self.beta)*self.Lz
+        else:
+            self.cost = self.Lx + self.beta*self.Lz
         self.scale_kl = scale_kl
         tf.summary.scalar("Lx", self.Lx)
         tf.summary.scalar("Lz", self.Lz)

@@ -1,0 +1,186 @@
+
+from counter import *
+import matplotlib
+import matplotlib.pyplot as plt
+import tensorflow as tf
+import numpy as np
+import h5py
+import os
+
+from sklearn.model_selection import  cross_val_score, train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import f1_score
+
+from keras.utils import to_categorical
+
+import sys
+sys.path.append("../src")
+
+from draw import DRAW
+from data_loader import load_clean
+
+matplotlib.use("Agg")
+
+print("PID: ", os.getpid())
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+
+def longform_latent(latent,):
+    longform_samples = np.zeros((
+                        latent.shape[1], 
+                        latent.shape[0]*latent.shape[2]
+                        ))
+
+    latent_dim = latent.shape[2]
+
+    for i, evts in enumerate(latent):
+        longform_samples[:, i*latent_dim:(i+1)*latent_dim] = evts
+
+    return longform_samples
+
+
+def compute_accuracy(X, y, Xtest, ytest):
+
+    model = LogisticRegression(
+            penalty="l2",
+            solver="newton-cg",
+            multi_class="multinomial",
+            class_weight="balanced",
+            max_iter=10000,
+        )
+
+    model.fit(X, y)
+
+    train_score = f1_score(y, model.predict(X), average=None)
+    test_score = f1_score(ytest, model.predict(Xtest), average=None)
+
+    return train_score, test_score 
+
+x_train, x_test, y_test = load_clean(80)
+
+T = 6
+enc_size = 500
+dec_size = 150
+latent_dim  = 3
+epochs = 20
+
+treshold_value = 0.3
+treshold_data = False
+
+batch_size = 50
+
+delta = 0.98
+N = 65
+
+delta_write = delta
+delta_read = delta
+
+read_N = N
+write_N = N
+
+attn_config = {
+    "read_N": read_N,
+    "write_N": write_N,
+    "write_N_sq": write_N**2,
+    "delta_w": delta,
+    "delta_r": delta,
+}
+
+mode_config = {
+        "simulated_mode": False,
+        "restore_mode": False,
+        "include_KL": False,
+        "include_MMD":True,
+        }
+
+model_train_targets = to_categorical(y_test)
+
+draw_model = DRAW(
+    T,
+    dec_size,
+    enc_size,
+    latent_dim,
+    x_train,
+    beta=100,
+    train_classifier=False,
+    use_conv=False,
+    use_attention=True,
+    #X_classifier=x_test,
+    #Y_classifier=model_train_targets,
+    mode_config=mode_config,
+    attn_config=attn_config,
+)
+
+graph_kwds = {
+    "initializer": tf.initializers.glorot_normal,
+    "n_encoder_cells": 1,
+    "n_decoder_cells": 1 
+}
+
+loss_kwds = {
+    "reconst_loss": None,
+    "scale_kl": False,
+}
+
+draw_model.CompileModel(graph_kwds, loss_kwds)
+
+opt = tf.train.AdamOptimizer
+opt_args = [1e-3, ]
+opt_kwds = {
+    "beta1": 0.8,
+}
+
+draw_model.computeGradients(opt, opt_args, opt_kwds)
+
+sess = tf.InteractiveSession()
+
+data_dir = "../drawing"
+model_dir = "../models"
+
+lx, lz, = draw_model.train(
+                        sess,
+                        epochs,
+                        data_dir,
+                        model_dir,
+                        batch_size,
+                        earlystopping=False)
+
+draw_model.X = x_test
+draw_model.generate_latent(sess, "../drawing", (x_test, ))
+
+latent_values , _, _ = draw_model.run_large(
+                                    sess,
+                                    draw_model.z_seq,
+                                    x_test,
+                                    )
+
+latent_train = longform_latent(latent_values[0])
+latent_test = longform_latent(latent_values[1])
+
+train_score, test_score = compute_accuracy(
+        latent_train, train_targets,
+        latent_test, test_targets)
+
+print()
+
+print("--------------------")
+print("train: ", train_score)
+print("test : ", test_score)
+print("---------------------")
+
+#draw_model.generate_samples("../drawing", )
+
+sess.close()
+
+fig, axs = plt.subplots(nrows=1, ncols=2, figsize=(15, 20), sharex=True)
+plt.suptitle("Loss function components")
+
+axs[0].plot(range(epochs), lx, label=r"$\mathcal{L}_x$")
+axs[1].plot(range(epochs), lz, label=r"$\mathcal{L}_z$")
+
+[a.legend() for a in axs]
+[a.set_ylim((1000, 200)) for a in axs]
+
+fig.savefig(
+    "../plots/simulated_loss_functions.png")

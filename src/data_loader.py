@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import h5py
 import numpy as np
+from tensorflow.keras.datasets import mnist
 
 
 def DataLoader(file_location):
@@ -12,6 +13,13 @@ def DataLoader(file_location):
     y_v = fileobj["test_targets"]
 
     return X_t, y_t, X_v, y_v
+
+def load_mnist(size):
+    (x_train, y_train), (x_test, y_test) = mnist.load_data()
+    x_train = np.expand_dims(x_train, -1)/255
+    x_test= np.expand_dims(x_test, -1)/255
+    x_tot = np.concatenate([x_train, x_test])
+    return x_train, x_test, y_test
 
 def load_clean(size):
     size = str(size)

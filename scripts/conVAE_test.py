@@ -71,8 +71,8 @@ mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
-        "include_MMD": False,
-        "include_KM": True,
+        "include_MMD": True,
+        "include_KM": False,
         "batchnorm":False
         }
 
@@ -108,22 +108,22 @@ if data == "simulated":
     n_layers = 4
     #kernel_architecture = [19, 19, 17]
 elif data=="clean":
-    run_130 = np.load("../data/clean/images/run_0130_label_False_size_49.npy")[:, 1:, 1:, :]
-    run_150 = np.load("../data/clean/images/run_0150_label_False_size_49.npy")[:, 1:, 1:, :]
+    run_130 = np.load("../data/clean/images/run_0130_label_False_size_80.npy")[:, 1:, 1:, :]
+    run_150 = np.load("../data/clean/images/run_0150_label_False_size_80.npy")[:, 1:, 1:, :]
     #run_170 = np.load("../data/clean/images/run_0170_label_False_size_50.npy")[:, 1:-1, 1:-1, :]
-    run_190 = np.load("../data/clean/images/run_0190_label_False_size_49.npy")[:, 1:, 1:, :]
-    run_210 = np.load("../data/clean/images/run_0210_label_False_size_49.npy")[:, 1:, 1:, :]
+    run_190 = np.load("../data/clean/images/run_0190_label_False_size_80.npy")[:, 1:, 1:, :]
+    run_210 = np.load("../data/clean/images/run_0210_label_False_size_80.npy")[:, 1:, 1:, :]
     x_train = np.concatenate([run_130, run_150,  run_190, run_210])
-    x_test = np.load("../data/clean/images/train_size_49.npy")[:, 1:, 1:, :]
-    y_test = np.load("../data/clean/targets/train_targets_size_49.npy")
+    x_test = np.load("../data/clean/images/train_size_80.npy")[:, 1:, 1:, :]
+    y_test = np.load("../data/clean/targets/train_targets_size_80.npy")
     y_test = np.squeeze(y_test)
-    kernel_architecture = [5, 3, 3, 3]
+    kernel_architecture = [5, 5, 3, 3]
     filter_architecture = [32, 64, 128, 128]
     strides_architecture += [2,]
     pool_architecture += [0,]
     clustering_config["pretrain_epochs"] = 200
     clustering_config["n_clusters"] = 3
-    n_layers = 3
+    n_layers = 4
 if data == "real":
     #Labelled data for testing
     with h5py.File("../data/images.h5", "r") as fo:
@@ -144,7 +144,7 @@ if data == "real":
 
 epochs = 2000
 
-latent_dim = 10
+latent_dim = 9
 batch_size = 256
 
 cvae = ConVae(
@@ -156,7 +156,7 @@ cvae = ConVae(
         latent_dim,
         x_train,
         #all_0130,
-        beta=0.9,
+        beta=11,
         #sampling_dim=100,
         clustering_config=clustering_config,
         mode_config=mode_config,
@@ -165,17 +165,16 @@ cvae = ConVae(
         )
 
 graph_kwds = {"activation":"relu", "output_activation":None}
-loss_kwds = {"reconst_loss": "mse"}
+loss_kwds = {"reconst_loss": None}
 cvae.compile_model(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
 opt_args = [1e-3, ]
 opt_kwds = {
-    "beta1": 0.9,
+    "beta1": 0.7,
 }
 
 cvae.compute_gradients(opt,)
-
 sess = tf.InteractiveSession()
 
 lx, lz = cvae.train(

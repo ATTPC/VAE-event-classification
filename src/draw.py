@@ -121,10 +121,10 @@ class DRAW(LatentModel):
     def _ModelGraph(
             self,
             initializer=tf.initializers.glorot_normal,
+            activation="tanh",
             n_encoder_cells=2,
             n_decoder_cells=2,
     ):
-        
         activations = {
                 "relu": tf.keras.layers.ReLU(),
                 "lrelu": tf.keras.layers.LeakyReLU(),
@@ -133,6 +133,9 @@ class DRAW(LatentModel):
                 }
         if self.use_conv:
             self.activation = activations[self.conv_architecture["activation_func"]]
+        else:
+            self.activation = activations[activation]
+
         self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
 
@@ -165,8 +168,8 @@ class DRAW(LatentModel):
                 )
             )
 
-        self.encoder = tf.nn.rnn_cell.MultiRNNCell(encoder_cells)
-        self.decoder = tf.nn.rnn_cell.MultiRNNCell(decoder_cells)
+        self.encoder = tf.nn.rnn_cell.MultiRNNCell(encoder_cells, )
+        self.decoder = tf.nn.rnn_cell.MultiRNNCell(decoder_cells, )
 
         self.read = self.read_a if self.use_attention else self.read_no_attn
         self.write = self.write_a if self.use_attention else self.write_no_attn
@@ -200,7 +203,7 @@ class DRAW(LatentModel):
             if t == 0:
                 x_hat = c_prev
             else:
-                x_hat = self.x - tf.sigmoid(c_prev)
+                x_hat = self.x - c_prev
 
             """ Encoder operations  """
             r = self.read(self.x, x_hat, h_dec_prev)
@@ -222,8 +225,8 @@ class DRAW(LatentModel):
                         self.q = self.clustering_layer(z)
             else:
                 with tf.variable_scope("sample", reuse=self.DO_SHARE):
-                    #z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
-                    z, latent_state = self.latent_cell(h_enc, latent_state)
+                    z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
+                    #z, latent_state = self.latent_cell(h_enc, latent_state)
 
             """ Decoder operations """
             h_dec, dec_state = self.decode(dec_state, z)
@@ -232,8 +235,16 @@ class DRAW(LatentModel):
 
             """Summarise variables """
             vars_ = [z, h_enc, h_dec] 
-            for v in vars_:
-                self.variable_summary(v)
+            names = [
+                    "latent_sample",
+                    "encoder_out",
+                    "decoder_out",
+                    ]
+            for i in range(len(vars_)):
+                with tf.variable_scope(names[i]+"_{}".format(t)):
+                    v = vars_[i]
+                    self.variable_summary(v)
+
             """ Storing and updating values """
             self.z_seq[t] = z
             self.dec_state_seq[t] = dec_state
@@ -315,14 +326,11 @@ class DRAW(LatentModel):
                                     tf.math.argmax(self.q, axis=-1)
                                     )
                 self.classifier_cost = tf.losses.softmax_cross_entropy(self.y_batch, self.q)
-
         elif self.include_MMD:
-
             n = self.batch_size
-
             norm1 = tf.distributions.Normal(0., 1.)
             norm2 = tf.distributions.Normal(6., 1.)
-            binom = tf.distributions.Multinomial(1., probs=[4/10, 2/10, 4/10])
+            binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
             self.Lz = 0
 
             """
@@ -352,7 +360,6 @@ class DRAW(LatentModel):
                 mmd = self.compute_mmd(ref, z)
                 self.Lz += mmd 
                 self.Lz += tf.losses.mean_squared_error(tf.reduce_mean(z,), 3)
-
             self.Lz = self.beta*self.Lz   # - self.T/2
 
         else:
@@ -361,6 +368,9 @@ class DRAW(LatentModel):
         cost = self.Lz + self.Lx
         cost += tf.losses.get_regularization_loss()
         self.cost = cost
+        tf.summary.scalar("Lx", self.Lx)
+        tf.summary.scalar("Lz", self.Lz)
+        tf.summary.scalar("cost", self.cost)
 
         if self.train_classifier:
             self.y_batch = tf.placeholder(
@@ -416,11 +426,11 @@ class DRAW(LatentModel):
     def read_conv(self, x, x_hat, h_dec_prev):
         with tf.variable_scope("gamma", reuse=self.DO_SHARE):
             gamma = self.linear(h_dec_prev, 1)
+            self.variable_summary(gamma)
         x = gamma*x
         x = tf.reshape(x, (tf.shape(x)[0], self.H, self.W, 1))
         x_hat = tf.reshape(x_hat, (tf.shape(x)[0], self.H, self.W, 1))
         out = tf.concat((x, x_hat), axis=3)
-
         if self.use_vgg:
             with tf.variable_scope("read", reuse=self.DO_SHARE):
                 out = tf.concat((out, tf.zeros_like(x)), axis=3)
@@ -454,10 +464,11 @@ class DRAW(LatentModel):
 
                     out = tf.keras.layers.Conv2D(
                         filters=filters,
-                        kernel_size=kernel_size,
-                        strides=strides,
+                        kernel_size=(kernel_size, kernel_size),
+                        strides=(strides, strides),
                         padding=padding,
                         use_bias=True,
+                        name="conv_{}".format(i),
                         #kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
                         #bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
                         )(out)
@@ -476,6 +487,8 @@ class DRAW(LatentModel):
 
                 if not self.DO_SHARE:
                     print("Final shape: ", self.flat_shape)
+                with tf.variable_scope("conv_out"):
+                    self.variable_summary(out)
 
                 out = tf.reshape(out, (tf.shape(x)[0], self.flat_shape))
                 return out
@@ -487,7 +500,6 @@ class DRAW(LatentModel):
 
         out_size = 0
         with tf.variable_scope("write", reuse=self.DO_SHARE):
-
             out = self.linear(h_dec, self.flat_shape)
             start_shape = (
                     self.out_shape[1],
@@ -505,6 +517,7 @@ class DRAW(LatentModel):
                 """
                 kernel_size = self.conv_architecture["kernel_size"][i]
                 strides = self.conv_architecture["strides"][i]
+                pool = self.conv_architecture["pool"][i]
 
                 if i == self.conv_architecture["n_layers"]-1 and pow_2:
                     padding= "valid"
@@ -514,20 +527,21 @@ class DRAW(LatentModel):
                     filters = 1
                 else:
                     filters = self.conv_architecture["filters"][i-1]
-
                 out = tf.keras.layers.Conv2DTranspose(
                     filters=filters,
-                    kernel_size=(kernel_size, )*2,
-                    strides=strides,
+                    kernel_size=(kernel_size, kernel_size),
+                    strides=(strides, strides),
                     padding=padding,
                     use_bias=True,
+                    name="convT_{}".format(i),
                     #kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
                     #bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
                 )(out)
 
+                if pool:
+                    out = tf.keras.layers.UpSampling2D(size=(2,2))(out) 
                 if not self.DO_SHARE:
                     print("Deconv shape: ", out.get_shape())
-
                 if self.conv_architecture["activation"][i]:
                     out = self.activation(out)
 

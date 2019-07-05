@@ -43,11 +43,6 @@ elif data=="clean":
     y_test = np.load("../data/clean/targets/train_targets_size_80.npy")
 
 n = 1000
-try:
-    os.mkdir("../randomsearch_simulated/run_{}".format(run))
-except:
-    pass
-
 with open("randomsearch_run.py", "w") as fo:
     fo.write("run={}".format(run+1))
 

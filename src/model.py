@@ -87,13 +87,11 @@ class LatentModel:
         w = tf.get_variable("w", [x.get_shape()[1], output_dim],
                             regularizer=regularizer(lmbd),
                             )
-
         b = tf.get_variable(
             "b",
             [output_dim],
             initializer=tf.constant_initializer(0.0),
-            regularizer=regularizer(lmbd))
-
+            )
         return tf.matmul(x, w) + b
 
     def clustering_layer(self, inputs):
@@ -284,6 +282,7 @@ class LatentModel:
         if run==0:
             files = glob.glob("../loss_records/tensorboard/run_{}/*".format(run))
             for f in files:
+                print("Removed: " + f)
                 os.remove(f)
 
         K.set_session(sess)
@@ -415,14 +414,14 @@ class LatentModel:
             if all_lz[i] < 0:
                 return all_lx, all_lz
 
+            "log performance to tensorboard"
+            feed_dict[self.performance] = performance
+            summary = sess.run(self.merged, feed_dict=feed_dict)
+            writer.add_summary(summary, i)
+
             if (1 + i) % log_every == 0 and i >= 0:
-                "log performance to tensorboard"
-                feed_dict[self.performance] = performance
-                summary = sess.run(self.merged, feed_dict=feed_dict)
-                writer.add_summary(summary, i)
                 if self.include_KM:
                     self.evaluate_cluster(sess, i)
-
                 if earlystopping:
                     to_earlystop = self.earlystopping(
                         smooth_loss,
@@ -431,7 +430,6 @@ class LatentModel:
                         i)
                     if to_earlystop:
                         break
-
                 if save_checkpoints:
                     self.storeResult(sess, feed_dict, data_dir, model_dir, i)
         return all_lx, all_lz

@@ -52,6 +52,8 @@ class RandomSearch:
                 "performance_"+self.arch+".npy",
                 ]
         for i in range(n):
+            if i > 0:
+                self.model_creator.sess.close()
             try:
                 model_inst = self.model_creator.generate_config()
                 lx, ly = self.model_creator.fit_model(model_inst, batch_size)
@@ -60,13 +62,16 @@ class RandomSearch:
                                         self.x_t,
                                         self.y_t
                                         )
+                print()
+                print("####################")
+                print("Performance run:", i )
+                print(performance)
+                print("--------------------")
                 self.savefiles(to_save, names, save_dir)
                 self.model_creator.sess.close()
             except tf.errors.InvalidArgumentError:
-                self.model_creator.sess.close()
                 continue
             except ResourceExhaustedError:
-                self.model_creator.sess.close()
                 continue
 
     def savefiles(self, to_save, names, save_dir):
