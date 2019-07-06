@@ -245,9 +245,9 @@ class LatentModel:
             self,
             sess,
             epochs,
-            data_dir,
-            model_dir,
             minibatch_size,
+            data_dir=None,
+            model_dir=None,
             save_checkpoints=True,
             earlystopping=True,
             checkpoint_fn=None,
@@ -284,6 +284,13 @@ class LatentModel:
             for f in files:
                 print("Removed: " + f)
                 os.remove(f)
+
+        if save_checkpoints:
+            if data_dir is None:
+                data_dir = "../drawing"
+            if model_dir is None:
+                model_dir = "../models"
+
 
         K.set_session(sess)
         #tf.keras.set_session(sess)

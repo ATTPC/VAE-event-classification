@@ -200,12 +200,11 @@ class ModelGenerator:
             fo.write("run={}".format(run.run + 1))
         lx, lz = model.train(
                     self.sess,
-                    20,
-                    "../drawing",
-                    "../models", 
+                    2000,
                     batch_size,
                     earlystopping=True,
-                    run=self.init_run
+                    run=self.init_run,
+                    save_checkpoints=False,
                 )
         self.loss_vals.append((lx, lz))
         self.init_run += 1
