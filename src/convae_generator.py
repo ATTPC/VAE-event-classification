@@ -57,6 +57,10 @@ class ConVaeGenerator(ModelGenerator):
         loss = ["mse", None][np.random.randint(0,2)]
         if loss == "mse":
             beta /= 1e3
+            out_act = None
+        else:
+            out_act = "sigmoid"
+
         model = self.model(
                     n_layers,
                     filter_architecture,
@@ -80,9 +84,10 @@ class ConVaeGenerator(ModelGenerator):
                 }
 
         activation = self.activations[np.random.randint(0, len(self.activations))]
-        #activation = "relu"
+
         graph_kwds = {
-                "activation":activation
+                "activation":activation,
+                "output_activation":out_act,
                 }
         loss_kwds = {"reconst_loss":loss}
         model.compile_model(graph_kwds=graph_kwds, loss_kwds=loss_kwds)

@@ -307,9 +307,8 @@ class ConVae(LatentModel):
             reconst_loss = self.binary_crossentropy
             self.Lx = tf.reduce_mean(
                             tf.reduce_sum(
-                                    reconst_loss(self.x, x_recons),
-                                    1)
-                            )
+                                    reconst_loss(self.x, x_recons),1)
+                                    )
         elif reconst_loss=="mse":
             self.Lx = tf.losses.mean_squared_error(self.x, x_recons)
 

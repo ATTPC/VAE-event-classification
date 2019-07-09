@@ -291,7 +291,6 @@ class LatentModel:
             if model_dir is None:
                 model_dir = "../models"
 
-
         K.set_session(sess)
         #tf.keras.set_session(sess)
         self.performance = tf.placeholder(tf.float32, shape=(), name="score")
@@ -321,11 +320,13 @@ class LatentModel:
             all_clf_loss = np.zeros(epochs)
 
         if self.include_KM:
-            self.pretrain_clustering(sess, minibatch_size)
+            to_term = self.pretrain_clustering(sess, minibatch_size)
 
         self.prev_loss = 0
         print("starting training..")
         for i in range(epochs):
+            print()
+            print("Epoch ", i, )
             if self.restore_mode:
                 self.saver.restore(sess, checkpoint_fn)
                 break
@@ -353,7 +354,7 @@ class LatentModel:
 
                     if to_break:
                         return all_lx, all_lz
-                    if performance < 0.1:
+                    if performance < 0.3:
                         return all_lx, all_lz
 
             """
@@ -396,7 +397,7 @@ class LatentModel:
             if self.train_classifier:
                 scores = self.evaluate_classifier(
                     sess, all_clf_loss, logloss_train, i)
-                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
+                print("| Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
                         train score {}  | test score {}".format(
                     i,
                     all_lx[i],
@@ -408,13 +409,12 @@ class LatentModel:
                 )
 
             else:
-                print("Epoch {} | Lx = {:5.4f} | Lz = {:5.4f} \r".format(
-                    i,
-                    all_lx[i],
-                    all_lz[i]
-                ),
-                    end="",
-                )
+                print("Lx = {:5.4f} | Lz = {:5.4f} \r".format(
+                            all_lx[i],
+                            all_lz[i]
+                            ),
+                        end="",
+                        )
 
             if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
                 return all_lx, all_lz
@@ -457,9 +457,11 @@ class LatentModel:
             signal (int): bool indicating whether the training should terminate
         """
         earlystop_beta = 0.5
-        patience = 5
+        patience = 2
 
         if all_lz is None:
+            loss = all_lx[i]
+        elif all_lz[i] < 1e-10:
             loss = all_lx[i]
         else:
             loss = np.average([all_lx[i], all_lz[i]])
@@ -493,8 +495,8 @@ class LatentModel:
             self,
             i,
             sess,
-            data_dir,
-            model_dir
+            data_dir=None,
+            model_dir=None,
     ):
         """
         Updates the target distribtuion with which the latent loss is taken
@@ -559,7 +561,8 @@ class LatentModel:
             print()
             print("precent_changed: ", precent_changed)
             if precent_changed < self.delta:
-                self.storeResult(sess, feed_dict, data_dir, model_dir, i)
+                if not (data_dir is None or model_dir is None):
+                    self.storeResult(sess, feed_dict, data_dir, model_dir, i)
                 retval = 1
             self.y_prev = all_pred
 
@@ -678,10 +681,13 @@ class LatentModel:
 
         print("Compute z")
         z = self.run_large(sess, self.z_seq[0], self.X,)
+        if np.nan in z:
+            return 1
         print("Fit k-means")
         km.fit(z)
         print("assign clusters")
         self.clusters.load(km.cluster_centers_, sess)
+        return 0
 
     def train_simulated(self, sess, epochs, minibatch_size):
         """

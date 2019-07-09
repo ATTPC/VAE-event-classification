@@ -27,7 +27,7 @@ def load_clean(size):
     run_150 = np.load("../data/clean/images/run_0150_label_False_size_"+size+".npy")
     run_190 = np.load("../data/clean/images/run_0150_label_False_size_"+size+".npy")
     run_210 = np.load("../data/clean/images/run_0210_label_False_size_"+size+".npy")
-    x_train = np.concatenate([run_130, run_150, run_190])
+    x_train = np.concatenate([run_130, run_150, run_190, run_210])
     x_test = np.load("../data/clean/images/train_size_"+size+".npy")
     y_test = np.load("../data/clean/targets/train_targets_size_"+size+".npy")
     return x_train, x_test, y_test
