@@ -124,7 +124,7 @@ class ConVae(LatentModel):
                         strides=(strides, strides),
                         padding=padding,
                         use_bias=True,
-                        #kernel_regularizer=k_reg,
+                        kernel_regularizer=k_reg,
                         #bias_regularizer=b_reg
                         )(h1)
 
@@ -171,6 +171,7 @@ class ConVae(LatentModel):
         else:
             sample = Dense(
                     self.latent_dim,
+                    kernel_regularizer=k_reg,
                     )(h1)
 
         if self.include_KM:
@@ -196,7 +197,10 @@ class ConVae(LatentModel):
             deconv_shape /= s
         deconv_shape = int(deconv_shape)
         full_deconv_shape = deconv_shape**2 * self.filter_arcitecture[-1]
-        de1 = Dense(full_deconv_shape,)(sample) 
+        de1 = Dense(
+                full_deconv_shape,
+                kernel_regularizer=k_reg,
+                )(sample) 
 
         with tf.name_scope("dense"):
             if self.batchnorm:
@@ -235,7 +239,7 @@ class ConVae(LatentModel):
                                     strides=(strides, strides),
                                     padding=padding,
                                     use_bias=True,
-                                    #kernel_regularizer=k_reg,
+                                    kernel_regularizer=k_reg,
                                     #bias_regularizer=b_reg,
                                     )
                 de1 = layer(de1)
@@ -330,9 +334,11 @@ class ConVae(LatentModel):
         elif self.include_MMD:
             z = self.z_seq[0]
             n = self.batch_size
-
-            norm1 = tf.distributions.Normal(0., 1.)
-            norm2 = tf.distributions.Normal(6., 1.)
+            
+            mean_0 = -10.
+            mean_1 = 10.
+            norm1 = tf.distributions.Normal(mean_0, 1.)
+            norm2 = tf.distributions.Normal(mean_1, 1.)
             binom = tf.distributions.Multinomial(1., probs=[0.5, 0.5])
 
             y1 = norm1.sample((n, self.latent_dim))
@@ -341,10 +347,18 @@ class ConVae(LatentModel):
 
             w = binom.sample((n, self.latent_dim))
             ref = w[:, :, 0]*y1 + w[:, :, 1]*y2 #+ w[:, :, 2]*y3
-
             #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
             mmd = self.compute_mmd(ref, z)
-            self.Lz = self.beta*mmd
+
+            """
+            regularize against the trivial solutions where values
+            congregate at the mixture mean, mu
+            """
+            mu = 0.5*(mean_0 + mean_1)
+            reg_term = tf.reduce_sum(tf.squared_difference(mu, z), 1)
+            trivial_reg = tf.math.divide(1, reg_term)
+            trivial_reg = 0.5*tf.reduce_mean(trivial_reg)
+            self.Lz = self.beta*mmd + trivial_reg
         elif self.include_KM:
             self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
             if self.include_MMD:

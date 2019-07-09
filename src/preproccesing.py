@@ -19,7 +19,6 @@ all_nonzero = np.concatenate([
                 train_simulated[nonzero_train],
                 test_simulated[nonzero_test],    
                 ], axis = 0)
-
 maxval = np.max(all_nonzero)
 minval = np.min(all_nonzero)
 
@@ -29,12 +28,13 @@ a = 1/maxval - b/maxval
 unitmap = lambda x: a*x + b 
 
 train_simulated[nonzero_train] = unitmap(train_simulated[nonzero_train])
+test_simulated[nonzero_test] = unitmap(test_simulated[nonzero_test])
 
 # print(np.max(train_simulated))
 np.save("../data/simulated/pr_train_simulated.npy", train_simulated)
 np.save("../data/simulated/pr_test_simulated.npy", test_simulated)
+sys.exit()
 X_train, y_train, X_test, y_test = DataLoader(file_location)
-
 
 def rgb2gray(rgb):
 

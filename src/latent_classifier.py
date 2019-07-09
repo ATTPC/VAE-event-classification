@@ -1,6 +1,6 @@
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix, accuracy_score
 from sklearn.model_selection import  cross_val_score, train_test_split
 
 def longform_latent(latent,):
@@ -50,8 +50,20 @@ def test_model(X, y, model, sess):
         pred_train = lr_model.predict(lr_train)
         pred_test = lr_model.predict(lr_test)
 
-        train_score = f1_score(lry_train, pred_train, average=None)
-        test_score = f1_score(lry_test, pred_test, average=None)
+        train_f1 = f1_score(lry_train, pred_train, average=None)
+        test_f1 = f1_score(lry_test, pred_test, average=None)
+
+        train_cm = confusion_matrix(lry_train, pred_train)
+        test_cm = confusion_matrix(lry_test, pred_test)
+
+        train_recall = train_cm.diagonal()/train_cm.sum(axis=1)
+        test_recall = test_cm.diagonal()/test_cm.sum(axis=1)
+        train_precision = train_cm.diagonal()/train_cm.sum(axis=0)
+        test_precision = test_cm.diagonal()/test_cm.sum(axis=0)
+
+        train_score = [train_f1, train_recall, train_precision]
+        test_score = [test_f1, test_recall, test_precision]
+
     except ValueError:
         train_score= [0,]*len(np.unique(y))
         test_score= [0,]*len(np.unique(y))

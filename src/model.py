@@ -416,7 +416,7 @@ class LatentModel:
                         end="",
                         )
 
-            if np.isnan(all_lz[i]) or np.isnan(all_lz[i]):
+            if np.isnan(all_lx[i]) or np.isnan(all_lz[i]):
                 return all_lx, all_lz
             if all_lz[i] < 0:
                 return all_lx, all_lz
@@ -847,11 +847,9 @@ class LatentModel:
                         loss=["mse", "kld"],
                         loss_weights=[self.beta, (1-self.beta)],
                         )
-        """
         for i, (g, v) in enumerate(grads):
             if g is not None:
                 grads[i] = (tf.clip_by_norm(g, 5), v)
-        """
 
         self.train_op = optimizer.apply_gradients(grads)
 
