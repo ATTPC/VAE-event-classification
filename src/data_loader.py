@@ -50,6 +50,7 @@ def load_real(size):
 def load_simulated(size):
     x_train = np.load("../data/simulated/pr_train_simulated.npy")
     x_test = np.load("../data/simulated/pr_test_simulated.npy")
+    x_train = np.concatenate([x_train, x_test])
     y_train = np.load("../data/simulated/train_targets.npy")
     y_test = np.load("../data/simulated/test_targets.npy")
     return x_train, x_test, y_test
