@@ -121,6 +121,8 @@ class DRAWGenerator(ModelGenerator):
                 "activation":activation
                 }
 
+        config.append(loss)
+        config.append(activation)
         model.compile_model(graph_kwds=graph_kwds, loss_kwds=loss_kwds)
         model.compute_gradients(opt, opt_args, opt_kwds)
         return model, config
