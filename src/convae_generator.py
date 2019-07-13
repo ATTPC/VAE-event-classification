@@ -31,7 +31,7 @@ class ConVaeGenerator(ModelGenerator):
             self.betas = np.linspace(0, 1, 10)
         else:
             self.betas = np.logspace(0, 4, 5)
-        self.ld = [3, 10, 20, 50, 100]
+        self.ld = [3, 10, 20, 50, 100, 150, 200]
         #self.sd = [10, 50, 150]
         self.X = X
 
