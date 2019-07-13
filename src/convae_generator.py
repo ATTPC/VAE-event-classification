@@ -81,9 +81,10 @@ class ConVaeGenerator(ModelGenerator):
                 }
 
         activation = self.activations[np.random.randint(0, len(self.activations))]
-        #activation = "relu"
+
         graph_kwds = {
-                "activation":activation
+                "activation":activation,
+                "output_activation":out_act,
                 }
         loss_kwds = {"reconst_loss":loss}
         config.append(loss)

@@ -73,6 +73,8 @@ class RandomSearch:
                 continue
             except ResourceExhaustedError:
                 continue
+            except ValueError:
+                continue
 
     def savefiles(self, to_save, names, save_dir):
         for o, n in zip(to_save, names):
