@@ -252,6 +252,7 @@ class LatentModel:
             earlystopping=True,
             checkpoint_fn=None,
             run=0,
+            verbose=1,
     ):
         """
         Training procedure for the model. Includes calls to model evaluations and architecture specific 
@@ -396,25 +397,26 @@ class LatentModel:
             if self.train_classifier:
                 scores = self.evaluate_classifier(
                     sess, all_clf_loss, logloss_train, i)
-                print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
-                        train score {}  | test score {}".format(
-                    i,
-                    all_lx[i],
-                    all_lz[i],
-                    all_clf_loss[i],
-                    scores[0],
-                    scores[1]
-                ),
-                )
+                if verbose:
+                    print("Epoch {} | Lx = {:5.2f} | Lz = {:5.2f} | clf cost {:5.2f} | \
+                            train score {}  | test score {}".format(
+                        i,
+                        all_lx[i],
+                        all_lz[i],
+                        all_clf_loss[i],
+                        scores[0],
+                        scores[1]
+                    ),
+                    )
 
-            else:
+            elif verbose:
                 print("Epoch {} | Lx = {:5.4e} | Lz = {:5.4} \r".format(
-                    i,
-                    all_lx[i],
-                    all_lz[i]
-                ),
+                        i,
+                        all_lx[i],
+                        all_lz[i]
+                        ),
                     end="",
-                )
+                    )
 
             if np.isnan(all_lx[i]) or np.isnan(all_lz[i]):
                 return all_lx, all_lz
