@@ -109,6 +109,8 @@ venv.bak/
 # data
 /data/*
 /data
+/drawing/*
+/drawing
 
 # models
 /models/*
@@ -121,3 +123,5 @@ venv.bak/
 
 # label files
 /labels/*
+
+
