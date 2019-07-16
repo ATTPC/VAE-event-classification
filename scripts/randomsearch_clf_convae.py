@@ -16,7 +16,7 @@ x_train, x_test, y_test = load_simulated(size)
 #x_train = x_train[np.random.randint(0, x_train.shape[0], size=(20000,))]
 
 n = 1000
-savedir = "../randomsearch_convae_simulated_clf/run_{}".format(run)
+savedir = "../randomsearch_convae_clean_clf/run_{}".format(run)
 with open("randomsearch_run.py", "w") as fo:
     fo.write("run={}".format(run+1))
 
