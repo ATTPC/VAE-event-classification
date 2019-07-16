@@ -64,7 +64,7 @@ def test_model(X, y, model, sess):
         test_score = [test_f1, test_recall, test_precision]
 
     except ValueError:
-        train_score = np.zeros((3, np.unique(np.argmax(y, axis=1))))
-        test_score = np.zeros((3, np.unique(np.argmax(y, axis=1))))
-    return train_score, test_score
+        train_score = np.zeros((3, y.shape[1]))
+        test_score = np.zeros((3, y.shape[1]))
+        return train_score, test_score
 
