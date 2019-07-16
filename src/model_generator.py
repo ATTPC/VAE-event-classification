@@ -176,7 +176,8 @@ class ModelGenerator:
         return filter_architecture
 
     def _make_kernel_config(self, n_layers):
-        kernel_sizes = np.array([11, 9, 7, 5, 3])
+        kernel_sizes = np.array([17,15 ,13, 11, 9, 7, 5, 3])
+        kernel_sizes = kernel_sizes[np.random.randint(0, len(kernel_sizes)-1):]
         available_layers = n_layers
         n_of_each_kernel = []
 
@@ -205,6 +206,7 @@ class ModelGenerator:
                     earlystopping=True,
                     run=self.init_run,
                     save_checkpoints=False,
+                    verbose=0,
                 )
         self.loss_vals.append((lx, lz))
         self.init_run += 1

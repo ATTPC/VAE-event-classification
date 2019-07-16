@@ -81,6 +81,10 @@ class ConVaeGenerator(ModelGenerator):
                 }
 
         activation = self.activations[np.random.randint(0, len(self.activations))]
+        if loss is None:
+            out_act = "sigmoid"
+        else:
+            out_act = None
 
         graph_kwds = {
                 "activation":activation,

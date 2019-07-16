@@ -43,7 +43,6 @@ def test_model(X, y, model, sess):
     latent_test = np.array(latent_test)
     latent_test = longform_latent(latent_test)
 
- 
     lr_train, lr_test, lry_train, lry_test = train_test_split(latent_test, y)
     try:
         lr_model = fit_logreg(lr_train, lry_train)
@@ -65,7 +64,7 @@ def test_model(X, y, model, sess):
         test_score = [test_f1, test_recall, test_precision]
 
     except ValueError:
-        train_score= [0,]*len(np.unique(y))
-        test_score= [0,]*len(np.unique(y))
+        train_score = np.zeros((3, np.unique(np.argmax(y, axis=1))))
+        test_score = np.zeros((3, np.unique(np.argmax(y, axis=1))))
     return train_score, test_score
 
