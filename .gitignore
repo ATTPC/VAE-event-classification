@@ -102,7 +102,9 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+#tensorboard files
 /loss_records/tensorboard/*
+/loss_records/tensorboard
 
 # data
 /data/*
