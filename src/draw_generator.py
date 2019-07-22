@@ -115,14 +115,18 @@ class DRAWGenerator(ModelGenerator):
         if not conv:
             activation = self.activations[np.random.randint(0, len(self.activations))]
         else:
-            activation = None
-
-        graph_kwds = {
-                "activation":activation
-                }
+            activation = conv_architecture["activation_func"]
 
         config.append(loss)
         config.append(activation)
+        config.append(T)
+
+        graph_kwds = {
+                "activation":activation,
+                "n_encoder_cells": 1,
+                "n_decoder_cells": 1,
+                }
+
         model.compile_model(graph_kwds=graph_kwds, loss_kwds=loss_kwds)
         model.compute_gradients(opt, opt_args, opt_kwds)
         return model, config

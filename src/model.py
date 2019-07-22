@@ -477,6 +477,8 @@ class LatentModel:
                 self.be_patient = True
             if smooth_loss[i] < smooth_loss[i-1]:
                 self.be_patient = False
+            if abs(smooth_loss[i] - smooth_loss[i-1]) < smooth_loss[i]*0.01:
+                retval = 1
 
         if self.be_patient and (i - self.patient_i) == patience:
             change = np.diff(smooth_loss[self.patient_i:  i])

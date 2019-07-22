@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.keras.layers import Flatten, Dense, Input, ZeroPadding2D
+from tensorflow.keras.layers import Flatten, Dense, Input, ZeroPadding2D, BatchNormalization
 from tensorflow.keras.losses import categorical_crossentropy
 from tensorflow.keras.models import Model
 from tensorflow.keras.applications.vgg16 import VGG16
@@ -207,9 +207,27 @@ class DRAW(LatentModel):
 
             """ Encoder operations  """
             r = self.read(self.x, x_hat, h_dec_prev)
+            if self.batchnorm:
+                r = BatchNormalization(
+                        axis=-1,
+                        center=True,
+                        scale=True,
+                        epsilon=1e-4
+                        )(r)
+
             #r = tf.tanh(r)
             h_enc, enc_state = self.encode(
-                enc_state, tf.concat([r, h_dec_prev], 1))
+                                        enc_state,
+                                        tf.concat([r, h_dec_prev], 1)
+                                        )
+            if self.batchnorm:
+                h_enc = BatchNormalization(
+                        axis=-1,
+                        center=True,
+                        scale=True,
+                        epsilon=1e-4
+                        )(h_enc)
+
             if self.include_KL:
                 z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(
                     h_enc)
@@ -231,6 +249,14 @@ class DRAW(LatentModel):
             """ Decoder operations """
             h_dec, dec_state = self.decode(dec_state, z)
             #dropout_h_dec = tf.keras.layers.Dropout(0.1)(h_dec, )
+            if self.batchnorm:
+                h_dec = BatchNormalization(
+                        axis=-1,
+                        center=True,
+                        scale=True,
+                        epsilon=1e-4
+                        )(h_dec)
+
             self.canvas_seq[t] = c_prev + self.write(h_dec)
 
             """Summarise variables """
@@ -480,7 +506,26 @@ class DRAW(LatentModel):
                         print("conv shape: ", out.get_shape())
 
                     if self.conv_architecture["activation"][i]:
-                        out = self.activation(out)
+                        _a = self.conv_architecture["activation_func"]
+                        if self.batchnorm:
+                            if _a == "relu" or _a == "lrelu":
+                                out = self.activation(out)
+                                out = BatchNormalization(
+                                        axis=-1,
+                                        center=True,
+                                        scale=True,
+                                        epsilon=1e-4,
+                                        )(out)
+                            else:
+                                out = BatchNormalization(
+                                        axis=-1,
+                                        center=True,
+                                        scale=True,
+                                        epsilon=1e-4,
+                                        )(out)
+                                out = self.activation(out)
+                        else:
+                            out = self.activation(out)
 
                 self.out_shape = out.get_shape()
                 self.flat_shape = self.out_shape[1]*self.out_shape[2]*self.out_shape[3]
@@ -543,7 +588,26 @@ class DRAW(LatentModel):
                 if not self.DO_SHARE:
                     print("Deconv shape: ", out.get_shape())
                 if self.conv_architecture["activation"][i]:
-                    out = self.activation(out)
+                    _a = self.conv_architecture["activation_func"]
+                    if self.batchnorm:
+                        if _a == "relu" or _a == "lrelu":
+                            out = self.activation(out)
+                            out = BatchNormalization(
+                                    axis=-1,
+                                    center=True,
+                                    scale=True,
+                                    epsilon=1e-4,
+                                    )(out)
+                        else:
+                            out = BatchNormalization(
+                                    axis=-1,
+                                    center=True,
+                                    scale=True,
+                                    epsilon=1e-4,
+                                    )(out)
+                            out = self.activation(out)
+                    else:
+                        out = self.activation(out)
 
         out = tf.keras.layers.Reshape((self.n_input,))(out,)
         return out

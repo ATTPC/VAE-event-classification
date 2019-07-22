@@ -15,14 +15,23 @@ DRIFT_VEL = 5.2
 point_cutoff = 20
 
 
-def filtering(xyz):
+def clean_filter(xyz):
     filtered_1 = xyz[xyz[:, 6] < 100]
     filtered_2 = filtered_1[(filtered_1[:, 2]*DRIFT_VEL/CLOCK) < 1250.]
     filtered_3 = filtered_2[filtered_2[:, 5] > 0.001]
     return filtered_3
 
+def real_filter(xyz):
+    return xyz
 
-def make_images(projection, labeled):
+
+def make_images(projection, labeled, clean=True):
+    if clean:
+        filtering = clean_filter
+        dirname = "clean"
+    else:
+        filtering = real_filter
+        dirname = "real"
 
     if labeled:
         runs = ["0210", "0130"]
@@ -102,7 +111,7 @@ def make_images(projection, labeled):
         discarded_events = np.array(discarded_events)
 
         np.save(
-            "../data/clean/discarded/discarded_events_{}_label_{}.npy".format(run, labeled),
+            "../data/"+dirname+"/discarded/discarded_events_{}_label_{}.npy".format(run, labeled),
             discarded_events)
 
         """
@@ -126,7 +135,7 @@ def make_images(projection, labeled):
         for i in range(len(normalized_charge_events)):
             events[i][0][:, 3] = normalized_charge_events[i]
 
-        image_size = 49
+        image_size = 80
         images = np.empty((len(events), image_size, image_size, 1), dtype=np.uint8)
         targets = np.empty(len(events), dtype=np.uint8)
 
@@ -173,7 +182,7 @@ def make_images(projection, labeled):
             targets[i] = target
 
         print("Saving...")
-        np.save("../data/clean/images/run_{}_label_{}_size_{}.npy".format(
+        np.save("../data/"+dirname+"/images/run_{}_label_{}_size_{}.npy".format(
                     run,
                     labeled,
                     image_size
@@ -181,10 +190,10 @@ def make_images(projection, labeled):
 
         if labeled:
             np.save(
-                    "../data/clean/targets/run_{}_targets_size_{}.npy".format(run, image_size),
+                    "../data/"+dirname+"/targets/run_{}_targets_size_{}.npy".format(run, image_size),
                     targets
                     )
 
 
 if __name__ == "__main__":
-    make_images("xy", False)
+    make_images("xy", False, False)

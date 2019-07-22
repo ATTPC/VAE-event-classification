@@ -10,7 +10,7 @@ from randomsearch import RandomSearch
 from data_loader import load_clean, load_simulated
 from randomsearch_run import run
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 print("PID: ", os.getpid())
 size = 80
 x_train, x_test, y_test = load_simulated(size)

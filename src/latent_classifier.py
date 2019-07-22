@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import f1_score, confusion_matrix, accuracy_score
 from sklearn.model_selection import  cross_val_score, train_test_split
 
@@ -39,32 +40,34 @@ def test_model(X, y, model, sess):
                                 X,
                                 )
     np.save("../drawing/latent/test_latent.npy", latent_test)
-
     latent_test = np.array(latent_test)
     latent_test = longform_latent(latent_test)
-
     lr_train, lr_test, lry_train, lry_test = train_test_split(latent_test, y)
     try:
-        lr_model = fit_logreg(lr_train, lry_train)
+        lr_model = fit_logreg(lr_train, lry_train.argmax(-1))
         pred_train = lr_model.predict(lr_train)
         pred_test = lr_model.predict(lr_test)
 
-        train_f1 = f1_score(lry_train, pred_train, average=None)
-        test_f1 = f1_score(lry_test, pred_test, average=None)
-
-        train_cm = confusion_matrix(lry_train, pred_train)
-        test_cm = confusion_matrix(lry_test, pred_test)
-
-        train_recall = train_cm.diagonal()/train_cm.sum(axis=1)
-        test_recall = test_cm.diagonal()/test_cm.sum(axis=1)
-        train_precision = train_cm.diagonal()/train_cm.sum(axis=0)
-        test_precision = test_cm.diagonal()/test_cm.sum(axis=0)
-
-        train_score = [train_f1, train_recall, train_precision]
-        test_score = [test_f1, test_recall, test_precision]
-
-    except ValueError:
+    except ValueError as e:
+        print("%%%%%%%%%%%%%%%%%")
+        print(e)
         train_score = np.zeros((3, y.shape[1]))
         test_score = np.zeros((3, y.shape[1]))
         return train_score, test_score
+
+    train_f1 = f1_score(lry_train.argmax(-1), pred_train, average=None)
+    test_f1 = f1_score(lry_test.argmax(-1), pred_test, average=None)
+
+    train_cm = confusion_matrix(lry_train.argmax(-1), pred_train)
+    test_cm = confusion_matrix(lry_test.argmax(-1), pred_test)
+
+    train_recall = train_cm.diagonal()/train_cm.sum(axis=1)
+    test_recall = test_cm.diagonal()/test_cm.sum(axis=1)
+    train_precision = train_cm.diagonal()/train_cm.sum(axis=0)
+    test_precision = test_cm.diagonal()/test_cm.sum(axis=0)
+
+    train_score = [train_f1, train_recall, train_precision]
+    test_score = [test_f1, test_recall, test_precision]
+
+    return train_score, test_score
 

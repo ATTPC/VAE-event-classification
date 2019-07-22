@@ -5,9 +5,10 @@ import os
 
 arrays = []
 targets = []
-size = "49" 
+data = "real"
+size = "80" 
 tmp = [arrays, targets]
-fps = ["../data/clean/images", "../data/clean/targets"]
+fps = ["../data/"+data+"/images", "../data/"+data+"/targets"]
 
 fp = fps[0]
 for (dirpath, dirnames, fnames) in os.walk(fp):

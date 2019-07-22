@@ -72,12 +72,17 @@ class RandomSearch:
             except tf.errors.InvalidArgumentError:
                 continue
             except ResourceExhaustedError:
+                print("--------------")
+                print("Out of Memory")
+                print("--------------")
                 continue
-            except ValueError:
+            except ValueError as e:
+                print("RandomSearch Error :")
+                print(e)
                 continue
 
     def savefiles(self, to_save, names, save_dir):
         for o, n in zip(to_save, names):
             o = np.array(o)
-            fn = os.path.normpath(save_dir+n)
+            fn = os.path.normpath(save_dir+"/"+n)
             np.save(fn, o)
