@@ -119,8 +119,7 @@ class DRAWGenerator(ModelGenerator):
 
         config.append(loss)
         config.append(activation)
-        config.append(T)
-
+        config.append([T, dec_size, enc_size])
         graph_kwds = {
                 "activation":activation,
                 "n_encoder_cells": 1,

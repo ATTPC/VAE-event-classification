@@ -9,16 +9,16 @@ from randomsearch import RandomSearch
 from data_loader import load_clean, load_real
 from randomsearch_run import run
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 print("PID: ", os.getpid())
-size = 80
+size = 128
 data = "real"
 if data == "real":
     x_train, x_test, y_test = load_real(size)
 else:
     x_train, x_test, y_test = load_clean(size)
 
-x_train = x_train[np.random.randint(0, x_train.shape[0], size=(20000,))]
+#x_train = x_train[np.random.randint(0, x_train.shape[0], size=(40000,))]
 n = 1000
 savedir = "../randomsearch_convae_"+data+"_{}_clf/run_{}".format(size, run)
 with open("randomsearch_run.py", "w") as fo:

@@ -25,7 +25,7 @@ def real_filter(xyz):
     return xyz
 
 
-def make_images(projection, labeled, clean=True):
+def make_images(projection, labeled, image_size=int(128), clean=True):
     if clean:
         filtering = clean_filter
         dirname = "clean"
@@ -134,8 +134,8 @@ def make_images(projection, labeled, clean=True):
 
         for i in range(len(normalized_charge_events)):
             events[i][0][:, 3] = normalized_charge_events[i]
-
-        image_size = 80
+        
+        print(type(image_size))
         images = np.empty((len(events), image_size, image_size, 1), dtype=np.uint8)
         targets = np.empty(len(events), dtype=np.uint8)
 
@@ -196,4 +196,4 @@ def make_images(projection, labeled, clean=True):
 
 
 if __name__ == "__main__":
-    make_images("xy", False, False)
+    make_images("xy", False, clean=True)

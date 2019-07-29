@@ -71,3 +71,32 @@ def test_model(X, y, model, sess):
 
     return train_score, test_score
 
+def performance_by_samples(X, y, model, sess):
+    latent_test = model.run_large(
+                                sess,
+                                model.z_seq,
+                                X,
+                                )
+    np.save("../drawing/latent/test_latent.npy", latent_test)
+    latent_test = np.array(latent_test)
+    latent_test = longform_latent(latent_test)
+    lr_train, lr_test, lry_train, lry_test = train_test_split(latent_test, y)
+    n_samples = lr_train.shape[0]
+    percentages = np.arange(0.1, 1, 0.1)
+    performance = np.zeros((percentages.shape[0], 2))
+    repeats = 10
+    for i, p in enumerate(percentages):
+        perf = np.zeros(repeats)
+        for j in  range(repeats):
+            n = int(np.ceil(n_samples * p))
+            which = np.random.randint(0, n_samples, size=n)
+            x_t = lr_train[which]
+            y_t = lry_train[which]
+            logreg = fit_logreg(x_t, y_t.argmax(-1))
+            pred = logreg.predict(lr_test)
+            f1 = f1_score(lry_test.argmax(-1), pred, average=None)
+            perf[j] = f1[0]
+
+        performance[i] = [perf.mean(), perf.std()]
+    return performance, percentages
+

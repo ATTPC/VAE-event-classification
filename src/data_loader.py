@@ -22,6 +22,41 @@ def load_mnist(size):
     x_tot = np.concatenate([x_train, x_test])
     return x_train, x_test, y_test
 
+def load_real_vgg(size):
+    size = str(size)
+    vgg_run_130 = np.load("../data/real/vgg_images/run_0130_label_False_size_"+size+".npy")
+    vgg_run_150 = np.load("../data/real/vgg_images/run_0150_label_False_size_"+size+".npy")
+    vgg_run_190 = np.load("../data/real/vgg_images/run_0150_label_False_size_"+size+".npy")
+    vgg_run_210 = np.load("../data/real/vgg_images/run_0210_label_False_size_"+size+".npy")
+    run_130 = np.load("../data/real/images/run_0130_label_False_size_"+size+".npy")
+    run_150 = np.load("../data/real/images/run_0150_label_False_size_"+size+".npy")
+    run_190 = np.load("../data/real/images/run_0150_label_False_size_"+size+".npy")
+    run_210 = np.load("../data/real/images/run_0210_label_False_size_"+size+".npy")
+    vgg_x_train = np.concatenate([vgg_run_130, vgg_run_150, vgg_run_190, vgg_run_210])
+    x_train = np.concatenate([run_130, run_150, run_190, run_210])
+    x_test = np.load("../data/real/vgg_images/train_size_"+size+".npy")
+    y_test = np.load("../data/real/targets/train_targets_size_"+size+".npy")
+    y_test = y_test.reshape((-1, 1))
+    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    return vgg_x_train, x_train, x_test, y_test
+
+def load_clean_vgg(size):
+    size = str(size)
+    vgg_run_130 = np.load("../data/clean/vgg_images/run_0130_label_False_size_"+size+".npy")
+    vgg_run_150 = np.load("../data/clean/vgg_images/run_0150_label_False_size_"+size+".npy")
+    vgg_run_190 = np.load("../data/clean/vgg_images/run_0150_label_False_size_"+size+".npy")
+    vgg_run_210 = np.load("../data/clean/vgg_images/run_0210_label_False_size_"+size+".npy")
+    run_130 = np.load("../data/clean/images/run_0130_label_False_size_"+size+".npy")
+    run_150 = np.load("../data/clean/images/run_0150_label_False_size_"+size+".npy")
+    run_190 = np.load("../data/clean/images/run_0150_label_False_size_"+size+".npy")
+    run_210 = np.load("../data/clean/images/run_0210_label_False_size_"+size+".npy")
+    vgg_x_train = np.concatenate([vgg_run_130, vgg_run_150, vgg_run_190, vgg_run_210])
+    x_train = np.concatenate([run_130, run_150, run_190, run_210])
+    x_test = np.load("../data/clean/vgg_images/train_size_"+size+".npy")
+    y_test = np.load("../data/clean/targets/train_targets_size_"+size+".npy")
+    y_test = y_test.reshape((-1, 1))
+    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    return vgg_x_train, x_train, x_test, y_test
 def load_clean(size):
     size = str(size)
     run_130 = np.load("../data/clean/images/run_0130_label_False_size_"+size+".npy")

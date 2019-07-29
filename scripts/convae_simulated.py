@@ -1,7 +1,7 @@
 import sys
 sys.path.append("../src")
 from convolutional_VAE import ConVae
-from data_loader import load_simulated
+from data_loader import load_simulated, load_clean, load_real
 from latent_classifier import test_model
 
 import h5py
@@ -19,15 +19,28 @@ import matplotlib.ticker as ticker
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-x_train, x_test, y_test = load_simulated(1)
-x_train = x_train[0:200]
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+data = "simulated"
+size = "128"
 
-n_layers = 4
-filter_architecture = [8, 16, 32, 64]
-kernel_architecture = [5, 5, 3, 3]
-strides_architecture = [2, 2, 2, 2,]
-pool_architecture = [0, 0, 0, 00]
+if data == "simulated":
+    x_train, x_test, y_test = load_simulated(128)
+elif data == "clean":
+    x_train, x_test, y_test = load_clean(128)
+elif data == "real":
+    x_train, x_test, y_test = load_real(128)
+#x_train = x_train[0:200]
+
+#n_layers = 4
+#filter_architecture = [8, 16, 32, 64]
+#kernel_architecture = [5, 5, 3, 3]
+#strides_architecture = [2, 2, 2, 2,]
+#pool_architecture = [0, 0, 0, 00]
+n_layers = 0
+filter_architecture = []
+kernel_architecture = []
+strides_architecture = []
+pool_architecture = []
 
 mode_config = {
         "simulated_mode": False,
@@ -35,18 +48,19 @@ mode_config = {
         "include_KL": False,
         "include_MMD": True,
         "include_KM": False,
-        "batchnorm": True, 
+        "batchnorm": True,
+        "use_vgg": True,
         }
 
-experiments = 10
+experiments = 4
 lxs = []
 lzs = []
 train_perf = []
 test_perf = []
 
 for i in range(experiments): 
-    epochs = 2000
-    latent_dim = 3 
+    epochs = 100
+    latent_dim = 10
     batch_size = 150
     print("experiment: ", i)
 
@@ -81,24 +95,27 @@ for i in range(experiments):
             batch_size,
             earlystopping=True,
             save_checkpoints=0,
-            verbose=0
+            verbose=1
             )
     p = test_model(x_test, y_test, cvae, sess)
     sess.close()
 
-    lxs.append(lx[1:])
-    lzs.append(lz[1:])
+    lxs.append(lx)
+    lzs.append(lz)
 
     train_perf.append(p[0])
     test_perf.append(p[1])
     print()
+    print("ITER NUMBER ", i )
+    print(train_perf)
+    print(test_perf)
 
 
 """
 MAKING PERFORMANCE TABLE
 """
 performance = np.array([train_perf, test_perf])
-np.save("../metrics_clf/simulated/performance_"+str(epochs)+".npy", performance)
+np.save("../metrics_clf/convae_"+data+"/performance_"+str(epochs)+".npy", performance)
 
 scores = np.zeros((
     len(names),

@@ -10,6 +10,10 @@ from keras import backend as K
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
+from tensorflow.keras.models import Model 
+from tensorflow.keras.layers import Input, Flatten
+from tensorflow.keras.applications.vgg16 import VGG16
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -112,6 +116,14 @@ class LatentModel:
         q **= (self.alpha + 1.0) / 2.0
         q = tf.transpose(tf.transpose(q) / tf.reduce_sum(q, axis=1))
         return q
+
+    def vgg_model(self, input_tensor, trainable=False):
+        vgg = VGG16(include_top=False, input_tensor=input_tensor)
+        o = Flatten()(vgg.output)
+        model = Model(inputs=self.x, outputs=o)
+        for l in model.layers:
+            l.trainable = trainable 
+        return model
 
     def pretrain(
         self,
@@ -313,6 +325,7 @@ class LatentModel:
         all_lx = np.zeros(epochs)
         all_lz = np.zeros(epochs)
         smooth_loss = np.zeros(epochs)
+        self.be_patient = False
 
         log_every = 9
 
@@ -324,7 +337,7 @@ class LatentModel:
         if self.include_KM:
             self.pretrain_clustering(sess, minibatch_size)
 
-        self.prev_loss = 0
+        self.prev_loss = 1
         print("starting training..")
         for i in range(epochs):
             if self.restore_mode:
@@ -334,7 +347,6 @@ class LatentModel:
             Lxs = []
             Lzs = []
             logloss_train = []
-            self.be_patient = False
             bm_inst = BatchManager(self.n_data, minibatch_size)
 
             if self.train_classifier:
@@ -370,6 +382,8 @@ class LatentModel:
                     feed_dict[self.kl_scale] = np.array([i/epochs, ])
                 if self.include_KM:
                     feed_dict[self.p] = self.P[ind]
+                if self.use_vgg:
+                    feed_dict[self.target] = self.target_imgs[ind]
 
                 results = sess.run(self.fetches, feed_dict)
                 Lx, Lz, _, _, _, = results
@@ -422,23 +436,34 @@ class LatentModel:
                 return all_lx, all_lz
             if all_lz[i] < 0:
                 return all_lx, all_lz
+            if all_lz is None:
+                loss = all_lx[i]
+                loss = all_lx[i-1]
+            else:
+                loss = np.average([all_lx[i], all_lz[i]])
+                loss_p = np.average([all_lx[i-1], all_lz[i-1]])
+            earlystop_beta = 0.5
+            smooth_loss[i] = (1 - earlystop_beta) * loss
+            smooth_loss[i] += earlystop_beta*self.prev_loss
+            self.prev_loss = smooth_loss[i]
 
             "log performance to tensorboard"
             feed_dict[self.performance] = performance
             summary = sess.run(self.merged, feed_dict=feed_dict)
             writer.add_summary(summary, i)
-
-            if (1 + i) % log_every == 0 and i >= 0:
-                if self.include_KM:
-                    self.evaluate_cluster(sess, i)
+            if i > 5:
                 if earlystopping:
-                    to_earlystop = self.earlystopping(
+                    to_earlystop, smooth_loss = self.earlystopping(
                         smooth_loss,
                         all_lx,
                         all_lz,
                         i)
                     if to_earlystop:
                         break
+
+            if (1 + i) % log_every == 0 and i >= 0:
+                if self.include_KM:
+                    self.evaluate_cluster(sess, i)
                 if save_checkpoints:
                     self.storeResult(sess, feed_dict, data_dir, model_dir, i)
         return all_lx, all_lz
@@ -458,16 +483,7 @@ class LatentModel:
         Returns:
             signal (int): bool indicating whether the training should terminate
         """
-        earlystop_beta = 0.5
         patience = 5
-
-        if all_lz is None:
-            loss = all_lx[i]
-        else:
-            loss = np.average([all_lx[i], all_lz[i]])
-        smooth_loss[i] = (1 - earlystop_beta) * loss
-        smooth_loss[i] += earlystop_beta*self.prev_loss
-        self.prev_loss = smooth_loss[i]
 
         retval = 0
         if i > 10:
@@ -475,23 +491,28 @@ class LatentModel:
                 if not self.be_patient:
                     self.patient_i = i
                 self.be_patient = True
-            if smooth_loss[i] < smooth_loss[i-1]:
-                self.be_patient = False
             if abs(smooth_loss[i] - smooth_loss[i-1]) < smooth_loss[i]*0.01:
-                retval = 1
+                if not self.be_patient:
+                    self.patient_i = i
+                self.be_patient = True
 
         if self.be_patient and (i - self.patient_i) == patience:
             change = np.diff(smooth_loss[self.patient_i:  i])
+            print(change)
             mean_change = change.mean()
+            rel_change = np.abs(change).mean()
             print("Earlystopping Mean", mean_change)
             print("changes", change)
             print("values", smooth_loss[self.patient_i: i])
             print("----------")
             self.be_patient = False
             if mean_change > 0:
+                print("Earlystopping: overfitting")
                 retval = 1
-
-        return retval
+            if rel_change < 0.01 * smooth_loss[self.patient_i: i].mean():
+                print("Earlystopping: converged")
+                retval = 1
+        return retval, smooth_loss
 
     def update_clusters(
             self,
@@ -563,7 +584,8 @@ class LatentModel:
             print()
             print("precent_changed: ", precent_changed)
             if precent_changed < self.delta:
-                self.storeResult(sess, feed_dict, data_dir, model_dir, i)
+                if not data_dir is None and not model_dir is None:
+                    self.storeResult(sess, feed_dict, data_dir, model_dir, i)
                 retval = 1
             self.y_prev = all_pred
 
@@ -974,7 +996,10 @@ class LatentModel:
 
         canvasses = sess.run(self.canvas_seq, feed_dict)
         canvasses = np.array(canvasses)
-        references = np.array(feed_dict[self.x])
+        if self.use_vgg:
+            references = np.array(feed_dict[self.target])
+        else:
+            references = np.array(feed_dict[self.x])
         epoch = "_epoch" + str(i)
 
         filename = data_dir+"/simulated/canvasses"+epoch + \

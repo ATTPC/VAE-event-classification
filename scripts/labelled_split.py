@@ -5,8 +5,8 @@ import os
 
 arrays = []
 targets = []
-data = "real"
-size = "80" 
+data = "clean"
+size = "128" 
 tmp = [arrays, targets]
 fps = ["../data/"+data+"/images", "../data/"+data+"/targets"]
 
