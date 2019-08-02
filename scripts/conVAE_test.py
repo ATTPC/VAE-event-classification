@@ -21,9 +21,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from keras.datasets import mnist
 
-
 print("PID: ", os.getpid())
-
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 def longform_latent(latent,):

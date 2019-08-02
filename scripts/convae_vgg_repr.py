@@ -20,8 +20,8 @@ import matplotlib.ticker as ticker
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-data = "vgg_real"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+data = "real"
 size = "128"
 
 if data == "simulated":
@@ -35,16 +35,15 @@ elif data == "vgg_clean":
 elif data == "vgg_real":
     vgg_x_train, x_train, x_test, y_test = load_real_vgg(size) 
     x_train = x_train.reshape((x_train.shape[0], -1))
-n_samp = 10000
-x_train = x_train[0:n_samp]
-vgg_x_train = vgg_x_train[0:n_samp]
+#n_samp = 10000
+#x_train = x_train[0:n_samp]
+#vgg_x_train = vgg_x_train[0:n_samp]
 
-n_layers = 5
-filter_architecture = [8, 16, 32, 64, 128]
-kernel_architecture = [9, 7, 5, 3, 3]
+n_layers = 2
+filter_architecture = [32, 32, 32, 32, 32]
+kernel_architecture = [5, 3, 5, 3, 3]
 strides_architecture = [2, 2, 2, 2, 2]
 pool_architecture = [0, 0, 0, 0, 0]
-n_layers = 0
 
 mode_config = {
         "simulated_mode": False,
@@ -53,7 +52,7 @@ mode_config = {
         "include_MMD": False,
         "include_KM": False,
         "batchnorm": True,
-        "use_vgg": True,
+        "use_vgg": False 
         }
 
 experiments = 1
@@ -64,7 +63,7 @@ test_perf = []
 
 for i in range(experiments): 
     epochs = 2000
-    latent_dim = 100
+    latent_dim = 1000
     batch_size = 150
     print("experiment: ", i)
 
@@ -75,12 +74,12 @@ for i in range(experiments):
             strides_architecture,
             pool_architecture,
             latent_dim,
-            vgg_x_train,
+            x_train,
             beta=0,
             mode_config=mode_config,
             labelled_data=[x_test, y_test]
             )
-    cvae.target_imgs = x_train
+    #cvae.target_imgs = x_train
 
     graph_kwds = {"activation":"lrelu", "output_activation":None}
     loss_kwds = {"reconst_loss": "mse"}

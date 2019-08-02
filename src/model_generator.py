@@ -11,7 +11,16 @@ sys.path.append("../scripts")
 import run
 
 class ModelGenerator:
-    def __init__(self, model):
+    def __init__(
+            self,
+            model,
+            use_vgg_repr = False,
+            target_images=None
+            ):
+        self.use_vgg_repr = use_vgg_repr
+        if self.use_vgg_repr and target_images is None:
+            raise ValueError("When using vgg reprsentation, must target images")
+        self.target_images = target_images 
         self.hyperparam_vals = []
         self.loss_vals = []
         self.performance_vals = []
@@ -39,7 +48,8 @@ class ModelGenerator:
                 "include_KL": False,
                 "include_MMD": False,
                 "include_KM:": False,
-                "batchnorm":False
+                "batchnorm":False,
+                "use_vgg": self.use_vgg_repr
                 }
 
         if self.train_clustering:
@@ -79,12 +89,13 @@ class ModelGenerator:
         return parameters_config
 
     def _generate_conv_config(self, n_layers):
-        strides_arcitecture = [2]*n_layers#np.random.randint(1, 3, size=n_layers)
         if self.architecture == "vgg":
+            strides_arcitecture = [1]*n_layers
             kernel_architecture = [3]*n_layers
             filter_architecture = self._make_vgg_filters(kernel_architecture)
             pooling_config = self._make_vgg_pooling_config(n_layers)
         else:
+            strides_arcitecture = [2]*n_layers#np.random.randint(1, 3, size=n_layers)
             kernel_architecture = self._make_kernel_config(n_layers)
             filter_architecture = self._make_filter_config(kernel_architecture)
             pooling_config = self._make_pooling_config(n_layers)

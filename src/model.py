@@ -57,7 +57,7 @@ class LatentModel:
             self.n_input = self.H*self.W*self.ch
             self.n_data = self.data_shape[0]
         else:
-            print("""Wrong input dimensions expected
+            raise ValueError("""Wrong input dimensions expected
                     x_train to have DIM == 3 or DIM == 4 got DIM == {}""".format(len(self.data_shape)))
 
         if mode_config is not None:
@@ -153,7 +153,7 @@ class LatentModel:
         to_feed = np.reshape(self.X, (self.X.shape[0], -1))
         earlystop = tf.keras.callbacks.EarlyStopping(
              monitor='loss',
-             patience=2,
+             patience=4,
              min_delta=1e-7
              )
         history = self.cae.fit(
@@ -366,7 +366,7 @@ class LatentModel:
 
                     if to_break:
                         return all_lx, all_lz
-                    if performance < 0.1:
+                    if performance < 0.8:
                         return all_lx, all_lz
 
             """
@@ -442,7 +442,7 @@ class LatentModel:
             else:
                 loss = np.average([all_lx[i], all_lz[i]])
                 loss_p = np.average([all_lx[i-1], all_lz[i-1]])
-            earlystop_beta = 0.5
+            earlystop_beta = 0.3
             smooth_loss[i] = (1 - earlystop_beta) * loss
             smooth_loss[i] += earlystop_beta*self.prev_loss
             self.prev_loss = smooth_loss[i]
@@ -484,14 +484,13 @@ class LatentModel:
             signal (int): bool indicating whether the training should terminate
         """
         patience = 5
-
         retval = 0
         if i > 10:
             if smooth_loss[i] > smooth_loss[i-1]:
                 if not self.be_patient:
                     self.patient_i = i
                 self.be_patient = True
-            if abs(smooth_loss[i] - smooth_loss[i-1]) < smooth_loss[i]*0.01:
+            if abs(smooth_loss[i] - smooth_loss[i-1]) < smooth_loss[i]*0.001:
                 if not self.be_patient:
                     self.patient_i = i
                 self.be_patient = True
@@ -509,7 +508,7 @@ class LatentModel:
             if mean_change > 0:
                 print("Earlystopping: overfitting")
                 retval = 1
-            if rel_change < 0.01 * smooth_loss[self.patient_i: i].mean():
+            if rel_change < 0.001 * smooth_loss[self.patient_i: i].mean():
                 print("Earlystopping: converged")
                 retval = 1
         return retval, smooth_loss
@@ -591,6 +590,8 @@ class LatentModel:
 
         if self.labelled_data != None:
             y_pred, targets = self.predict_cluster(sess,)
+            print("target shape", targets.shape)
+            print("pred shape", y_pred.shape)
             ars = adjusted_rand_score(targets, y_pred)
             nmi = normalized_mutual_info_score(targets, y_pred)
             performance = ars
@@ -670,8 +671,12 @@ class LatentModel:
         n_x = x_label.shape[0]
         x_label = np.reshape(x_label, (n_x, self.n_input))
         targets = self.labelled_data[1]
+        if len(targets.shape) == 2:
+            if targets.shape[1] > 1:
+                targets = targets.argmax(-1)
+                targets = np.ravel(targets) 
         q_label = self.run_large(sess, self.q, x_label)
-        y_pred = q_label.argmax(1)
+        y_pred = np.squeeze(q_label.argmax(1))
         return y_pred, targets
 
     def pretrain_clustering(self, sess, minibatch_size):

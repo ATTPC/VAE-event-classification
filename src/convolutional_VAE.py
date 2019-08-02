@@ -32,6 +32,7 @@ class ConVae(LatentModel):
             clustering_config=None,
             sampling_dim=100,
             labelled_data=None,
+            target_imgs=None,
             train_classifier=False,
             ):
 
@@ -44,6 +45,7 @@ class ConVae(LatentModel):
         self.include_KM = False
         self.use_vgg = False
         self.pretrain_simulated = False
+        self.target_imgs = target_imgs
         self.batchnorm = False
 
         super().__init__(X, latent_dim, beta, mode_config)
@@ -100,7 +102,6 @@ class ConVae(LatentModel):
                 }
 
         self.x = tf.keras.layers.Input(shape=(self.n_input,))
-
         #self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
         self.x_img = tf.keras.layers.Reshape((self.H, self.W, self.ch))(self.x, )
@@ -109,7 +110,11 @@ class ConVae(LatentModel):
 
         k_reg = kernel_reg(kernel_reg_strength)
         b_reg = bias_reg(bias_reg_strenght)
-        pow_2 = self.H % 2**self.n_layers != 0
+        if self.use_vgg:
+            assert len(self.target_imgs.shape) == 2
+            pow_2 = np.sqrt(self.target_imgs.shape[1]) % 2 ** self.n_layers != 0
+        else:
+            pow_2 = self.H % 2**self.n_layers != 0
 
         if self.use_vgg:
             """
@@ -120,8 +125,8 @@ class ConVae(LatentModel):
             """
             vgg_shape = self.H*self.W*self.ch
             h1 = tf.keras.layers.Reshape((vgg_shape,))(h1)
-            units = 2048
-            for i in range(2):
+            units = 512
+            for i in range(self.dense_layers):
                 h1 = Dense(
                         units,
                         kernel_regularizer=k_reg
@@ -236,18 +241,20 @@ class ConVae(LatentModel):
 
         # %%
         if self.use_vgg:
-            #self.n_layers = 5
-            #self.strides_architecture = [2, 2, 2, 2, 2]
-            #self.kernel_architecture = [9, 7, 5, 3, 3]
-            #self.filter_arcitecture = [2, 16, 32, 64, 128]
-            #self.pooling_architecture = [0, 0, 0, 0, 0]
             deconv_shape = np.sqrt(self.target_imgs.shape[1])
             print("OG DECONV", deconv_shape)
         else:
             deconv_shape = int(self.x_img.get_shape()[1])
         for i in range(self.n_layers):
             s = self.strides_architecture[i]
-            deconv_shape /= s
+            p = self.pooling_architecture[i]
+            if s == 2:
+                div = 2
+            elif p == 1:
+                div = 2
+            else:
+                div = 1
+            deconv_shape /= div
         deconv_shape = int(deconv_shape)
         print("DECONV SHAPE", deconv_shape)
         full_deconv_shape = deconv_shape**2 * self.filter_arcitecture[-1]
@@ -351,7 +358,7 @@ class ConVae(LatentModel):
             decoder_out = tf.keras.layers.Reshape((self.n_input,))(decoder_out)
 
         self.cae = Model(inputs=self.x, outputs=decoder_out)
-        #print(self.cae.summary())
+        print(self.cae.summary())
         if self.include_KM:
             self.dcec = Model(inputs=self.x, outputs=[decoder_out, self.q])
             #print(self.dcec.summary())

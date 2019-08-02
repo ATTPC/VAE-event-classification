@@ -1,9 +1,10 @@
 import sys
 sys.path.append("../src")
 from convolutional_VAE import ConVae
-from data_loader import load_simulated, load_clean, load_real
+from data_loader import load_simulated, load_clean, load_real, load_real_event
 from latent_classifier import test_model
 
+import scipy
 import h5py
 
 import numpy as np
@@ -19,47 +20,57 @@ import matplotlib.ticker as ticker
 
 print("PID: ", os.getpid())
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-data = "simulated"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+data = "event"
 size = "128"
 
 if data == "simulated":
     x_train, x_test, y_test = load_simulated(128)
 elif data == "clean":
     x_train, x_test, y_test = load_clean(128)
+elif data == "event":
+    which = "0210"
+    x_train, x_test, y_test = load_real_event(size, which)
 elif data == "real":
     x_train, x_test, y_test = load_real(128)
 #x_train = x_train[0:200]
 
-#n_layers = 4
-#filter_architecture = [8, 16, 32, 64]
-#kernel_architecture = [5, 5, 3, 3]
-#strides_architecture = [2, 2, 2, 2,]
-#pool_architecture = [0, 0, 0, 00]
-n_layers = 0
-filter_architecture = []
-kernel_architecture = []
-strides_architecture = []
-pool_architecture = []
+n_layers = 3 
+filter_architecture = [8, 16, 32, 64]
+kernel_architecture = [5, 5, 3, 3]
+strides_architecture = [1,1,1]
+pool_architecture = [0, 1, 0, 0]
 
 mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
-        "include_MMD": True,
+        "include_MMD": False,
         "include_KM": False,
         "batchnorm": True,
-        "use_vgg": True,
+        "use_vgg": False,
         }
 
-experiments = 4
+clustering_config = {
+        "n_clusters": 3,
+        "alpha": 1,
+        "delta":0.01,
+        "pretrain_simulated": False,
+        "pretrain_epochs": 200,
+        "update_interval": 3
+        }
+
+
+experiments = 1 
 lxs = []
 lzs = []
 train_perf = []
 test_perf = []
 
 for i in range(experiments): 
-    epochs = 100
+    epochs = 2000
     latent_dim = 10
     batch_size = 150
     print("experiment: ", i)
@@ -74,6 +85,7 @@ for i in range(experiments):
             x_train,
             beta=10,
             mode_config=mode_config,
+            clustering_config=clustering_config,
             labelled_data=[x_test, y_test]
             )
 
@@ -88,7 +100,7 @@ for i in range(experiments):
     }
 
     cvae.compute_gradients(opt,)
-    sess = tf.InteractiveSession() 
+    sess = tf.InteractiveSession(config=config) 
     lx, lz = cvae.train(
             sess,
             epochs,

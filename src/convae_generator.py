@@ -16,9 +16,11 @@ class ConVaeGenerator(ModelGenerator):
             n_classes=3,
             labelled_data=None,
             clustering=True,
-            architecture="vgg"
+            architecture="vgg",
+            use_vgg_repr=False,
+            target_images=None,
             ):
-        super().__init__(ConVae)
+        super().__init__(ConVae, use_vgg_repr, target_images)
         self.architecture = architecture
         self.train_clustering = clustering
         self.labelled_data = labelled_data
@@ -31,6 +33,8 @@ class ConVaeGenerator(ModelGenerator):
             self.betas = np.linspace(0, 1, 10)
         else:
             self.betas = np.logspace(0, 4, 5)
+        if self.use_vgg_repr:
+            self.dense_layers = [1, 2, 3]
         self.ld = [3, 10, 20, 50, 100, 150, 200]
         #self.sd = [10, 50, 150]
         self.X = X
@@ -58,6 +62,7 @@ class ConVaeGenerator(ModelGenerator):
         if loss == "mse":
             beta /= 1e3
             config[1][0] = beta
+        
         model = self.model(
                     n_layers,
                     filter_architecture,
@@ -71,7 +76,12 @@ class ConVaeGenerator(ModelGenerator):
                     mode_config=mode_config,
                     clustering_config=clustering_config,
                     labelled_data=self.labelled_data,
+                    target_imgs=self.target_images
                 )
+        if self.use_vgg_repr:
+            n_dense = self.dense_layers[np.random.randint(0, len(self.dense_layers))]
+            model.dense_layers = n_dense
+            config[1].append(n_dense)
 
         opt = tf.train.AdamOptimizer
         opt_args =[eta,]

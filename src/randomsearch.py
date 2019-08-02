@@ -14,7 +14,9 @@ class RandomSearch:
             y_t,
             model_gen: ModelGenerator,
             clustering=True,
-            architecture="vgg"
+            architecture="vgg",
+            use_vgg_repr=False,
+            target_images=None,
             ):
         """
         Parameters:
@@ -34,9 +36,12 @@ class RandomSearch:
                                 [self.x_t, self.y_t],
                                 clustering,
                                 architecture,
+                                use_vgg_repr,
+                                target_images,
                                 )
 
     def search(self, n, batch_size, save_dir):
+        print(save_dir)
         try:
             os.mkdir(save_dir)
         except FileExistsError:
