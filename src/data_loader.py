@@ -44,7 +44,7 @@ def load_real_vgg(size):
     if scipy.sparse.issparse(y_test):
         y_test = y_test.toarray()
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
     return vgg_x_train, x_train, x_test, y_test
 
 def load_real_event(size, event="0210"):
@@ -57,7 +57,7 @@ def load_real_event(size, event="0210"):
     if scipy.sparse.issparse(y_test):
         y_test = y_test.toarray()
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
     return x_train, x_test, y_test
 
 def load_real_vgg_event(size, event="0210"):
@@ -72,7 +72,7 @@ def load_real_vgg_event(size, event="0210"):
     if scipy.sparse.issparse(y_test):
         y_test = y_test.toarray()
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
     return vgg_x_train, x_train, x_test, y_test
 
 def load_clean_vgg_event(size, event="0210"):
@@ -87,7 +87,7 @@ def load_clean_vgg_event(size, event="0210"):
     if scipy.sparse.issparse(y_test):
         y_test = y_test.toarray()
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
     return vgg_x_train, x_train, x_test, y_test
 
 def load_clean_event(size, event="0210"):
@@ -99,9 +99,8 @@ def load_clean_event(size, event="0210"):
     if scipy.sparse.issparse(y_test):
         y_test = y_test.toarray()
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(categories=[range(3)], sparse=False).fit_transform(y_test)
     return x_train, x_test, y_test
-
 
 def load_clean_vgg(size):
     size = str(size)
@@ -116,11 +115,13 @@ def load_clean_vgg(size):
     vgg_x_train = np.concatenate([vgg_run_130, vgg_run_150, vgg_run_190, vgg_run_210])
     x_train = np.concatenate([run_130, run_150, run_190, run_210])
     x_train = x_train.reshape((x_train.shape[0], -1))
-    x_test = np.load("../data/clean/vgg_images/train_size_"+size+".npy")
+    vgg_x_test = np.load("../data/clean/vgg_images/train_size_"+size+".npy")
     y_test = np.load("../data/clean/targets/train_targets_size_"+size+".npy")
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
-    return vgg_x_train, x_train, x_test, y_test
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
+    return vgg_x_train, x_train, vgg_x_test, y_test
+
+
 def load_clean(size):
     size = str(size)
     run_130 = np.load("../data/clean/images/run_0130_label_False_size_"+size+".npy")
@@ -131,7 +132,7 @@ def load_clean(size):
     x_test = np.load("../data/clean/images/train_size_"+size+".npy")
     y_test = np.load("../data/clean/targets/train_targets_size_"+size+".npy")
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
     return x_train, x_test, y_test
 
 def load_real(size):
@@ -144,7 +145,7 @@ def load_real(size):
     x_test = np.load("../data/real/images/train_size_"+size+".npy")
     y_test = np.load("../data/real/targets/train_targets_size_"+size+".npy")
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(3)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(3)]).fit_transform(y_test)
     return x_train, x_test, y_test
 
 def load_simulated(size):
@@ -154,8 +155,21 @@ def load_simulated(size):
     y_train = np.load("../data/simulated/targets/train_targets.npy")
     y_test = np.load("../data/simulated/targets/test_targets.npy")
     y_test = y_test.reshape((-1, 1))
-    y_test = OneHotEncoder(categories=[range(2)]).fit_transform(y_test)
+    y_test = OneHotEncoder(sparse=False, categories=[range(2)]).fit_transform(y_test)
     return x_train, x_test, y_test
+
+def load_vgg_simulated(size):
+    vgg_x_train = np.load("../data/simulated/vgg_images/pr_train_simulated.npy")
+    vgg_x_test = np.load("../data/simulated/vgg_images/pr_test_simulated.npy")
+    vgg_x_train = np.concatenate([vgg_x_train, vgg_x_test])
+    x_test = np.load("../data/simulated/images/pr_test_simulated.npy")
+    x_train = np.load("../data/simulated/images/pr_train_simulated.npy")
+    x_train = np.concatenate([x_train, x_test])
+    x_train = x_train.reshape((x_train.shape[0], -1))
+    y_test = np.load("../data/simulated/targets/test_targets.npy")
+    y_test = y_test.reshape((-1, 1))
+    y_test = OneHotEncoder(sparse=False, categories=[range(2)]).fit_transform(y_test)
+    return vgg_x_train, x_train, vgg_x_test, y_test
 
 if __name__ == "__main__":
     #file_location = "~/Documents/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"

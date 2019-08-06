@@ -405,7 +405,6 @@ class ConVae(LatentModel):
         elif self.include_MMD:
             z = self.z_seq[0]
             n = self.batch_size
-            
             mean_0 = -10.
             mean_1 = 10.
             norm1 = tf.distributions.Normal(mean_0, 1.)

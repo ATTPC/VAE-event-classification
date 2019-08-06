@@ -17,7 +17,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
-
 print("PID: ", os.getpid())
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"

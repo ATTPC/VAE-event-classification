@@ -9,14 +9,19 @@ from randomsearch import RandomSearch
 from data_loader import load_clean, load_real
 from data_loader import load_real_vgg_event, load_clean_vgg_event
 from data_loader import load_real_event, load_clean_event
+from data_loader import load_vgg_simulated
 from randomsearch_run import run
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 print("PID: ", os.getpid())
 size = "128"
-use_vgg = False
-data = "vgg_cleanevent"
+data = "vgg_simulated"
 method = "clf"
+
+if "vgg" in data:
+    use_vgg = True
+else:
+    use_vgg = False
 
 if data == "real":
     x_train, x_test, y_test = load_real(size)
@@ -28,12 +33,12 @@ elif data == "cleanevent":
     x_train, x_test, y_test = load_clean_event(size, which)
 elif data == "vgg_realevent":
     which = "0210"
-    use_vgg = True
     vgg_x_train, x_train, x_test, y_test = load_real_vgg_event(size, which)
 elif data == "vgg_cleanevent":
     which = "0210"
-    use_vgg = True
     vgg_x_train, x_train, x_test, y_test = load_clean_vgg_event(size, which)
+elif data == "vgg_simulated":
+    vgg_x_train, x_train, x_test, y_test = load_vgg_simulated(size)
 else:
     x_train, x_test, y_test = load_clean(size)
 

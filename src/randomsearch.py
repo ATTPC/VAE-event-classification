@@ -43,7 +43,7 @@ class RandomSearch:
     def search(self, n, batch_size, save_dir):
         print(save_dir)
         try:
-            os.mkdir(save_dir)
+            os.makedirs(save_dir)
         except FileExistsError:
             raise FileExistsError("That run has already been performed, please specify  another")
         to_save = [

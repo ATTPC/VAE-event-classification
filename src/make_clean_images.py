@@ -206,4 +206,4 @@ def make_images(projection, image_size=int(128), clean=True):
 
 
 if __name__ == "__main__":
-    make_images("xy", clean=False)
+    make_images("xy", clean=True)

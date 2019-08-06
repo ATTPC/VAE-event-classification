@@ -156,6 +156,7 @@ class LatentModel:
              patience=4,
              min_delta=1e-7
              )
+
         history = self.cae.fit(
                 to_feed,
                 to_feed,
@@ -363,7 +364,6 @@ class LatentModel:
                         data_dir,
                         model_dir,
                     )
-
                     if to_break:
                         return all_lx, all_lz
                     if performance < 0.8:
@@ -518,7 +518,7 @@ class LatentModel:
             i,
             sess,
             data_dir,
-            model_dir
+            model_dir,
     ):
         """
         Updates the target distribtuion with which the latent loss is taken
@@ -698,21 +698,31 @@ class LatentModel:
             self.train_simulated(sess, 15, minibatch_size)
 
         self.pretrain(sess, self.pretrain_epochs, minibatch_size)
+        if self.self_supervise:
+            q_sim = self.run_large(sess, self.q, self.X_c)
+            cluster_centers = np.zeros((self.n_clusters, self.latent_dim))
+            for n in range(self.n_clusters):
+                which = self.Y_c == n
+                cluster_centers[n, :] = q_sim[which].mean(0)
+        else:
+            print("Training K-means..... ")
+            km = KMeans(
+                n_clusters=self.n_clusters,
+                n_init=20,
+                max_iter=1000,
+                n_jobs=10,
+            )
 
-        print("Training K-means..... ")
-        km = KMeans(
-            n_clusters=self.n_clusters,
-            n_init=20,
-            max_iter=1000,
-            n_jobs=10,
-        )
+            print("Compute z")
+            z = self.run_large(sess, self.z_seq[0], self.X,)
+            print("Fit k-means")
+            km.fit(z)
+            print("assign clusters")
+            cluster_centers = km.cluster_centers_
 
-        print("Compute z")
-        z = self.run_large(sess, self.z_seq[0], self.X,)
-        print("Fit k-means")
-        km.fit(z)
-        print("assign clusters")
-        self.clusters.load(km.cluster_centers_, sess)
+        #sort cluster centers wrt. to sim results
+
+        self.clusters.load(cluster_centers, sess)
 
     def train_simulated(self, sess, epochs, minibatch_size):
         """
@@ -759,6 +769,7 @@ class LatentModel:
             clf_cost (array): classifier cost for the given data
             clf_acc (array): classifier score for the given data 
         """
+
         clf_batch = self.X_c[batch_ind]
         clf_batch = clf_batch.reshape(
             np.size(batch_ind), self.n_input)

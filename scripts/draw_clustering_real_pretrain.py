@@ -38,20 +38,9 @@ tmp = np.zeros(np.array(y_sim.shape) + [0, 1])
 tmp[:, :-1] = y_sim
 y_sim = tmp
 
-data = "clean"
-
-if data=="noisy":
-    noisy_130 = np.load("../data/processed/all_0130.npy")[:200]
-    X = noisy_130
-    x_train = np.load("../data/processed/train.npy")
-    with h5py.File("../data/images.h5", "r") as fo:
-        y_train = np.array(fo["train_targets"])
-else:
-    run_130 = np.load("../data/clean/images/run_0130_label_False.npy")[:200]
-    run_150 = np.load("../data/clean/images/run_0150_label_False.npy")[:200]
-    X = np.concatenate([run_130, run_150])
-    x_train = np.load("../data/clean/images/train.npy")
-    y_train = np.load("../data/clean/targets/train_targets.npy")
+data = "cleanevent"
+if data == "cleanevent":
+    x_train, x_test, y_test = load_clean_event("128")
 
 delta = 0.8
 N = 55
