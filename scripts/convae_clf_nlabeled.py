@@ -10,7 +10,7 @@ import sys
 sys.path.append("../src")
 from evaluate_n_labeled import n_labeled_data
 
-vgg = False
+vgg = True
 alternate = ""
 prefix = "vgg_" if vgg else ""
 
@@ -44,7 +44,6 @@ for i in range(len(means)):
         ms=10,
         **error_kw
     )
-    
 
 plt.legend(loc="best")
 ax.set_xlabel("N labeled samples")

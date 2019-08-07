@@ -24,12 +24,11 @@ def n_labeled_data(x_set, y_set, sample_size, dataset_names, ):
 def n_labeled_estimator(x, y, sample_size, classes=3):
     x_tr, x_te, y_tr, y_te = train_test_split(x, y, train_size=0.7)
     n_train = x_tr.shape[0]
-    n_iter = 100
+    n_iter = 2
     performance = np.zeros((n_iter, (n_train // sample_size) + 1))
     lw = loop_wrapper(performance, x_te, y_te, n_train, sample_size)
-    
-    Parallel(n_jobs=10)([delayed(lw)(x_tr, y_tr, i) for i in range(n_iter)])
-    
+    Parallel(n_jobs=10, require="sharedmem")([delayed(lw)(x_tr, y_tr, i) for i in range(n_iter)])
+    #print("PERFORMANCE ATTR ", lw.performance)
     mean_performances = lw.performance.mean(axis=0)
     std_performances = lw.performance.std(axis=0)
     return mean_performances, std_performances
@@ -42,7 +41,6 @@ class loop_wrapper:
         self.n_train = n_train
         self.sample_size = sample_size
         self.i = 0
-        
     def __call__(self, x_tr, y_tr, i):
         bm = BatchManager(self.n_train, self.sample_size)
         x_samp = None
@@ -61,13 +59,14 @@ class loop_wrapper:
                 )
             lr = fit_model(x_samp, y_samp)
             self.performance[i, j] = f1_score(self.y_te, lr.predict(self.x_te), average="macro")
+            #print("Sample size ", (j+1)*bm.batch_size, self.performance[i, j])
 
 def fit_model(x_samp, y_samp): 
     lr = LogisticRegression(
     class_weight="balanced",
     multi_class="ovr",
     solver="newton-cg",
-    max_iter=1000,
+    max_iter=10000,
     penalty="l2"
     )
     lr.fit(x_samp, y_samp)
