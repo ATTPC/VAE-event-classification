@@ -434,6 +434,8 @@ class LatentModel:
 
             if np.isnan(all_lx[i]) or np.isnan(all_lz[i]):
                 return all_lx, all_lz
+            if np.isinf(all_lx[i]) or np.isinf(all_lz[i]):
+                return all_lx, all_lz
             if all_lz[i] < 0:
                 return all_lx, all_lz
             if all_lz is None:
@@ -496,19 +498,19 @@ class LatentModel:
                 self.be_patient = True
 
         if self.be_patient and (i - self.patient_i) == patience:
-            change = np.diff(smooth_loss[self.patient_i:  i])
+            change = np.diff(smooth_loss[self.patient_i-1:  i-1])
             print(change)
             mean_change = change.mean()
             rel_change = np.abs(change).mean()
             print("Earlystopping Mean", mean_change)
             print("changes", change)
-            print("values", smooth_loss[self.patient_i: i])
+            print("values", smooth_loss[self.patient_i-1: i-1])
             print("----------")
             self.be_patient = False
             if mean_change > 0:
                 print("Earlystopping: overfitting")
                 retval = 1
-            if rel_change < 0.001 * smooth_loss[self.patient_i: i].mean():
+            if rel_change < 0.001 * smooth_loss[self.patient_i-1].mean():
                 print("Earlystopping: converged")
                 retval = 1
         return retval, smooth_loss

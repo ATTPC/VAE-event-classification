@@ -62,7 +62,6 @@ class ConVaeGenerator(ModelGenerator):
         if loss == "mse":
             beta /= 1e3
             config[1][0] = beta
-        
         model = self.model(
                     n_layers,
                     filter_architecture,
