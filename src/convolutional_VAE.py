@@ -238,7 +238,9 @@ class ConVae(LatentModel):
         self.z_seq = [sample,]
         self.dec_state_seq = []
         #self.encoder = Model(in_layer, [self.mean, self.var, sample], name="encoder")
-
+        
+        if self.use_dd:
+            self.dd_reconst = self.dueling_decoder(sample, activations[activation])
         # %%
         if self.use_vgg:
             deconv_shape = np.sqrt(self.target_imgs.shape[1])
@@ -387,6 +389,10 @@ class ConVae(LatentModel):
         elif reconst_loss=="mse":
             self.Lx = tf.losses.mean_squared_error(self.target, x_recons)
 
+        if self.use_dd:
+            self.dd_target = tf.placeholder(tf.float32)
+            self.dd_Lx = tf.losses.mean_squared_error(self.dd_target, self.dd_reconst)
+
         if self.pretrain_simulated:
             self.y_batch = tf.placeholder(tf.float32)
             self.clf_acc = tf.metrics.accuracy(
@@ -444,6 +450,9 @@ class ConVae(LatentModel):
             self.cost = self.beta*self.Lx + (1-self.beta)*self.Lz
         else:
             self.cost = self.Lx + self.beta*self.Lz
+            if self.use_dd:
+                self.cost += self.lmbd * self.dd_Lx
+                tf.summary.scalar("Lx_dd", self.dd_Lx)
         self.scale_kl = scale_kl
         tf.summary.scalar("Lx", self.Lx)
         tf.summary.scalar("Lz", self.Lz)

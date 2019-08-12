@@ -22,12 +22,18 @@ def n_labeled_data(x_set, y_set, sample_size, dataset_names, ):
     return means, stds
 
 def n_labeled_estimator(x, y, sample_size, classes=3):
-    x_tr, x_te, y_tr, y_te = train_test_split(x, y, train_size=0.7)
+    train_size = 0.6
+    x_tr, x_te, y_tr, y_te = train_test_split(
+            x,
+            y,
+            train_size=train_size,
+            test_size=1-train_size,
+            )
     n_train = x_tr.shape[0]
-    n_iter = 2
+    n_iter = 10
     performance = np.zeros((n_iter, (n_train // sample_size) + 1))
     lw = loop_wrapper(performance, x_te, y_te, n_train, sample_size)
-    Parallel(n_jobs=10, require="sharedmem")([delayed(lw)(x_tr, y_tr, i) for i in range(n_iter)])
+    Parallel(n_jobs=5, require="sharedmem")([delayed(lw)(x_tr, y_tr, i) for i in range(n_iter)])
     #print("PERFORMANCE ATTR ", lw.performance)
     mean_performances = lw.performance.mean(axis=0)
     std_performances = lw.performance.std(axis=0)
@@ -64,9 +70,9 @@ class loop_wrapper:
 def fit_model(x_samp, y_samp): 
     lr = LogisticRegression(
     class_weight="balanced",
-    multi_class="ovr",
+    multi_class="multinomial",
     solver="newton-cg",
-    max_iter=10000,
+    max_iter=1000,
     penalty="l2"
     )
     lr.fit(x_samp, y_samp)

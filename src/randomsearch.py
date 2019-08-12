@@ -17,6 +17,8 @@ class RandomSearch:
             architecture="vgg",
             use_vgg_repr=False,
             target_images=None,
+            use_dd=False,
+            dd_targets=None,
             ):
         """
         Parameters:
@@ -38,6 +40,8 @@ class RandomSearch:
                                 architecture,
                                 use_vgg_repr,
                                 target_images,
+                                use_dd,
+                                dd_targets
                                 )
 
     def search(self, n, batch_size, save_dir):

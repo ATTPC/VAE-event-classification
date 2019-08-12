@@ -19,8 +19,10 @@ class ConVaeGenerator(ModelGenerator):
             architecture="vgg",
             use_vgg_repr=False,
             target_images=None,
+            use_dd=False,
+            dd_targets=None,
             ):
-        super().__init__(ConVae, use_vgg_repr, target_images)
+        super().__init__(ConVae, use_vgg_repr, target_images, use_dd, dd_targets)
         self.architecture = architecture
         self.train_clustering = clustering
         self.labelled_data = labelled_data
@@ -29,6 +31,7 @@ class ConVaeGenerator(ModelGenerator):
         self.latent_types = ["include_KL", "include_MMD", None]
         self.activations = ["relu", "lrelu"]
         self.etas = np.logspace(-5, -1, 5)
+        self.lambdas = np.linspace(0.1, 200, 50)
         if self.train_clustering:
             self.betas = np.linspace(0, 1, 10)
         else:
@@ -58,7 +61,10 @@ class ConVaeGenerator(ModelGenerator):
 
         mode_config = config[2]
         clustering_config = config[3]
-        loss = ["mse", None][np.random.randint(0,2)]
+        if self.architecture == "static":
+            loss = "mse" 
+        else:
+            loss = ["mse", None][np.random.randint(0,2)]
         if loss == "mse":
             beta /= 1e3
             config[1][0] = beta
@@ -81,6 +87,11 @@ class ConVaeGenerator(ModelGenerator):
             n_dense = self.dense_layers[np.random.randint(0, len(self.dense_layers))]
             model.dense_layers = n_dense
             config[1].append(n_dense)
+        if self.use_dd:
+            lmbd = self.lambdas[np.random.randint(0, len(self.lambdas))]
+            model.lmbd = lmbd
+            model.dd_targets = self.dd_targets
+            config[1].append(lmbd)
 
         opt = tf.train.AdamOptimizer
         opt_args =[eta,]

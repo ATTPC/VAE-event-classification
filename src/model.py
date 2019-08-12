@@ -98,6 +98,16 @@ class LatentModel:
             )
         return tf.matmul(x, w) + b
 
+    def dueling_decoder(self, z, activation):
+        out_dim = self.dd_targets.shape[1]
+        n_dim = 50 
+        h = z
+        for i in range(self.dd_dense):
+            h = tf.keras.layers.Dense(n_dim)(h)
+            h = activation(h)
+            #h = tf.keras.layers.Dropout(0.5)(h)
+        return tf.keras.layers.Dense(out_dim)(h)
+
     def clustering_layer(self, inputs):
         """
         Soft mapping from  a latent sample to a predictions on clusters
@@ -384,6 +394,8 @@ class LatentModel:
                     feed_dict[self.p] = self.P[ind]
                 if self.use_vgg:
                     feed_dict[self.target] = self.target_imgs[ind]
+                if self.use_dd:
+                    feed_dict[self.dd_target] = self.dd_targets[ind]
 
                 results = sess.run(self.fetches, feed_dict)
                 Lx, Lz, _, _, _, = results
@@ -431,13 +443,13 @@ class LatentModel:
                         ),
                     end="",
                     )
-
+            
             if np.isnan(all_lx[i]) or np.isnan(all_lz[i]):
-                return all_lx, all_lz
+                break
             if np.isinf(all_lx[i]) or np.isinf(all_lz[i]):
-                return all_lx, all_lz
+                break
             if all_lz[i] < 0:
-                return all_lx, all_lz
+                break
             if all_lz is None:
                 loss = all_lx[i]
                 loss = all_lx[i-1]
@@ -510,7 +522,7 @@ class LatentModel:
             if mean_change > 0:
                 print("Earlystopping: overfitting")
                 retval = 1
-            if rel_change < 0.001 * smooth_loss[self.patient_i-1].mean():
+            if rel_change < 0.001 * smooth_loss[self.patient_i-1]:
                 print("Earlystopping: converged")
                 retval = 1
         return retval, smooth_loss

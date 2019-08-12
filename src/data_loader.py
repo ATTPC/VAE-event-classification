@@ -171,6 +171,17 @@ def load_vgg_simulated(size):
     y_test = OneHotEncoder(sparse=False, categories=[range(2)]).fit_transform(y_test)
     return vgg_x_train, x_train, vgg_x_test, y_test
 
+def load_realevent_hist(size, event="0210"):
+    run = np.load("../data/real/q_histograms/run_"+event+"_label_False_size_"+size+".npy")
+    lab_run = np.load("../data/real/q_histograms/run_"+event+"_label_True_size_"+size+".npy")
+    return run, lab_run
+
+def load_realevent_netcharge(size, event="0210"):
+    run = np.load("../data/real/net_charge/run_"+event+"_label_False_size_"+size+".npy")
+    lab_run = np.load("../data/real/net_charge/run_"+event+"_label_True_size_"+size+".npy")
+    run = run.reshape((-1, 1)) 
+    lab_run = lab_run.reshape((-1, 1)) 
+    return run, lab_run
 if __name__ == "__main__":
     #file_location = "~/Documents/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"
     #a = DataLoader(file_location)

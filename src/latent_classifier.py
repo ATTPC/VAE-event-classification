@@ -42,7 +42,11 @@ def test_model(X, y, model, sess):
     np.save("../drawing/latent/test_latent.npy", latent_test)
     latent_test = np.array(latent_test)
     latent_test = longform_latent(latent_test)
-    lr_train, lr_test, lry_train, lry_test = train_test_split(latent_test, y)
+    lr_train, lr_test, lry_train, lry_test = train_test_split(
+            latent_test,
+            y,
+            train_size=0.65
+            )
     try:
         lr_model = fit_logreg(lr_train, lry_train.argmax(-1))
         pred_train = lr_model.predict(lr_train)

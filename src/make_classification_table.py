@@ -1,19 +1,12 @@
-import tensorflow as tf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import h5py
-import keras
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_validate
 
 from sklearn.decomposition import PCA
 from sklearn.metrics import f1_score, confusion_matrix, make_scorer
 
-from keras.models import Model 
-from keras.layers import Input, Flatten
-from keras.applications.vgg16 import VGG16
-from data_loader import * 
 pd.set_option('display.max_colwidth', -1)
 
 class f1_class_n:
@@ -26,23 +19,23 @@ class f1_class_n:
     
 def compute_oos_performance(perf_dict, classes):
     df = pd.DataFrame()
-    train_means = []
-    train_stds = []
-    test_means = []
-    test_stds = []
+    train_means = {}
+    train_stds = {}
+    test_means = {}
+    test_stds = {}
     for key, item in perf_dict.items():
         if "test" in key:
             class_ = key.split("_")[1]
-            test_means.append(item.mean())
-            test_stds.append(item.std())
+            test_means[class_] = item.mean()
+            test_stds[class_] = item.std()
             print(class_)
         elif "train" in key:
             class_ = key.split("_")[1]
-            train_means.append(item.mean())
-            train_stds.append(item.std())
-            
+            train_means[class_] = item.mean()
+            train_stds[class_] = item.std()
     for l in [train_means, train_stds, test_means, test_stds]:
-        l.append(np.mean(l))
+        vals = list(l.values())
+        l["All"] = np.mean(vals)
     return train_means, train_stds, test_means, test_stds, classes
 
 def model(x, y, classes):
@@ -64,11 +57,19 @@ def model(x, y, classes):
     )
     return perf_dict
 
-def make_performance_table(x_set, y_set, dataset_names):
-    perf_array = np.zeros((3, 4), dtype=object)
-    columns = ["Proton", "Carbon", "Other", "All"]
-    rows = ["Simulated", "Filtered", "Full"]
-    for i in range(3):
+def make_performance_table(
+        x_set,
+        y_set,
+        dataset_names,
+        rows=None,
+        columns=None,
+        ):
+    if columns is None:
+        columns = ["Proton", "Carbon", "Other", "All"]
+    if rows is None:
+        rows = ["Simulated", "Filtered", "Full"]
+    perf_array = np.zeros((len(rows), len(columns)), dtype=object)
+    for i in range(len(rows)):
         classes = dataset_names[i]
         x = x_set[i]
         x = x if len(x.shape) == 2 else x.reshape((x.shape[0], -1))
@@ -81,8 +82,9 @@ def make_performance_table(x_set, y_set, dataset_names):
         for j in range(4):
             if len(test_means) ==3 and j == 3:
                 continue
-            mean = test_means[j]
-            std = test_stds[j]
+            #print(test_means)
+            mean = test_means[classes[j]]
+            std = test_stds[classes[j]]
             perf_str = r"$\underset{{\num{{+- {:.3e} }}  }}{{\num{{ {:.3g} }} }}$".format(std, mean)
             if len(test_means) == 3 and j == 2:
                 perf_array[i, j] = "N/A"

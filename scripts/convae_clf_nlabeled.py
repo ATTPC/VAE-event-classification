@@ -2,22 +2,24 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-
 import numpy as np
 import os 
-
 import sys
+
 sys.path.append("../src")
 from evaluate_n_labeled import n_labeled_data
 
+print(os.getpid())
 vgg = True
+dd = True
 alternate = ""
 prefix = "vgg_" if vgg else ""
+prefix += "dd_" if dd else ""
 
 x_set = np.load("../data/latent/clf_latent/" + alternate + prefix + "data_repr.npy")
 y_set = np.load("../data/latent/clf_latent/targets.npy")
 dataset_names = [
- ['Proton', 'Carbon', 'All'],
+ #['Proton', 'Carbon', 'All'],
  ['Proton', 'Carbon', 'Other', 'All'],
  ['Proton', 'Carbon', 'Other', 'All']
  ]

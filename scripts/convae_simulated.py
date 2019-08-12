@@ -1,7 +1,7 @@
 import sys
 sys.path.append("../src")
 from convolutional_VAE import ConVae
-from data_loader import load_simulated, load_clean, load_real, load_real_event
+from data_loader import *
 from latent_classifier import test_model
 
 import scipy
@@ -11,6 +11,7 @@ import numpy as np
 import keras as ker
 import os
 import tensorflow as tf
+from  run import run
 
 import matplotlib
 matplotlib.use("Agg")
@@ -36,21 +37,25 @@ elif data == "real":
     x_train, x_test, y_test = load_real(128)
 #x_train = x_train[0:200]
 
-n_layers = 3 
-filter_architecture = [8, 16, 32, 64]
-kernel_architecture = [5, 5, 3, 3]
-strides_architecture = [1,1,1]
-pool_architecture = [0, 1, 0, 0]
+n_layers = 4
+filter_architecture = [8, 8, 32, 32, 64, 16]
+kernel_architecture = [5, 5, 3, 3] 
+strides_architecture = [2, 2, 2, 2]
+pool_architecture = [0,]*n_layers
 
 mode_config = {
         "simulated_mode": False,
         "restore_mode": False,
         "include_KL": False,
-        "include_MMD": False,
+        "include_MMD": True,
         "include_KM": False,
         "batchnorm": True,
         "use_vgg": False,
+        "use_dd": False,
         }
+
+if mode_config["use_dd"]:
+    q_hist_x_train, q_hist_x_test = load_real_event_hist("128")
 
 clustering_config = {
         "n_clusters": 3,
@@ -61,7 +66,6 @@ clustering_config = {
         "update_interval": 3
         }
 
-
 experiments = 1 
 lxs = []
 lzs = []
@@ -70,9 +74,11 @@ test_perf = []
 
 for i in range(experiments): 
     epochs = 2000
-    latent_dim = 10
+    latent_dim = 100
     batch_size = 150
     print("experiment: ", i)
+    with open("run.py", "w") as fo:
+        fo.write("run = {}".format(run+1))
 
     cvae = ConVae(
             n_layers,
@@ -82,31 +88,35 @@ for i in range(experiments):
             pool_architecture,
             latent_dim,
             x_train,
-            beta=10,
+            beta=0.01,
             mode_config=mode_config,
             clustering_config=clustering_config,
             labelled_data=[x_test, y_test]
             )
+    if mode_config["use_dd"]:
+        cvae.dd_targets = q_hist_x_train
+        cvae.lmbd = 50
 
-    graph_kwds = {"activation":"relu", "output_activation":None}
+    graph_kwds = {"activation":"lrelu", "output_activation":None}
     loss_kwds = {"reconst_loss": "mse"}
     cvae.compile_model(graph_kwds, loss_kwds)
 
     opt = tf.train.AdamOptimizer
-    opt_args = [1e-4, ]
+    opt_args = [1e-3, ]
     opt_kwds = {
-        "beta1": 0.7,
+        "beta1": 0.7829,
     }
 
-    cvae.compute_gradients(opt,)
+    cvae.compute_gradients(opt, opt_args, opt_kwds)
     sess = tf.InteractiveSession(config=config) 
     lx, lz = cvae.train(
             sess,
             epochs,
             batch_size,
             earlystopping=True,
-            save_checkpoints=0,
-            verbose=1
+            save_checkpoints=1,
+            verbose=1,
+            run=run,
             )
     p = test_model(x_test, y_test, cvae, sess)
     sess.close()

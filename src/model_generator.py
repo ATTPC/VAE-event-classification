@@ -15,11 +15,17 @@ class ModelGenerator:
             self,
             model,
             use_vgg_repr = False,
-            target_images=None
+            target_images=None,
+            use_dd=False,
+            dd_targets=None,
             ):
         self.use_vgg_repr = use_vgg_repr
         if self.use_vgg_repr and target_images is None:
-            raise ValueError("When using vgg reprsentation, must target images")
+            raise ValueError("When using vgg reprsentation, must supply target images")
+        self.use_dd = use_dd 
+        if self.use_dd and dd_targets is None:
+            raise ValueError("When using dual decoders, must supply alt. repr")
+        self.dd_targets = dd_targets
         self.target_images = target_images 
         self.hyperparam_vals = []
         self.loss_vals = []
@@ -49,7 +55,8 @@ class ModelGenerator:
                 "include_MMD": False,
                 "include_KM:": False,
                 "batchnorm":False,
-                "use_vgg": self.use_vgg_repr
+                "use_vgg": self.use_vgg_repr,
+                "use_dd": self.use_dd
                 }
 
         if self.train_clustering:
@@ -94,7 +101,13 @@ class ModelGenerator:
             kernel_architecture = [3]*n_layers
             filter_architecture = self._make_vgg_filters(kernel_architecture)
             pooling_config = self._make_vgg_pooling_config(n_layers)
-        else:
+        elif self.architecture == "static":
+            n_layers = 4
+            strides_arcitecture = [2]*n_layers
+            kernel_architecture = [5, 5, 3, 3]
+            filter_architecture = self._make_filter_config(kernel_architecture)
+            pooling_config = [0]*n_layers
+        elif self.architecture == "ours":
             strides_arcitecture = [2]*n_layers#np.random.randint(1, 3, size=n_layers)
             kernel_architecture = self._make_kernel_config(n_layers)
             filter_architecture = self._make_filter_config(kernel_architecture)
@@ -171,14 +184,15 @@ class ModelGenerator:
     def _make_filter_config(self, kernel_architecture):
         n_layers = len(kernel_architecture)
         filter_architecture = []
-        filter_exp = 5
-        n_filters= 2**np.random.randint(1, filter_exp)
+        max_exp = 6
+        filter_exp = np.random.randint(3, max_exp)
+        n_filters= 2**filter_exp
         k = kernel_architecture[0]
 
         for i in range(n_layers):
             if kernel_architecture[i] != k:
                 k = kernel_architecture[i]
-                n_filters = 2**np.random.randint(1, filter_exp+1) 
+                n_filters = 2**np.random.randint(filter_exp, max_exp) 
                 filter_exp += 1
                 filter_architecture.append(n_filters)
             else:
