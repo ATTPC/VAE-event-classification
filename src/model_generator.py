@@ -53,7 +53,7 @@ class ModelGenerator:
                 "restore_mode": False,
                 "include_KL": False,
                 "include_MMD": False,
-                "include_KM:": False,
+                "include_KM": False,
                 "batchnorm":False,
                 "use_vgg": self.use_vgg_repr,
                 "use_dd": self.use_dd
@@ -84,7 +84,10 @@ class ModelGenerator:
         beta1 = np.random.uniform(0.2, 0.96)
         beta2 = 0.99
         latent_dim = self.ld[np.random.randint(0, len(self.ld))]
+        if self.train_clustering:
+            latent_dim = self.cl_ld[np.random.randint(0, len(self.cl_ld))]
         #sampling_dim = self.sd[np.random.randint(0, len(self.sd))]
+        reg_strength = self.reg_strengths[np.random.randint(0, len(self.reg_strengths))]
         parameters_config = [
                 beta,
                 eta,
@@ -92,6 +95,7 @@ class ModelGenerator:
                 beta2,
                 latent_dim,
                 #sampling_dim,
+                reg_strength
                 ]
         return parameters_config
 
@@ -154,8 +158,9 @@ class ModelGenerator:
                 "n_clusters": self.n_classes,
                 "alpha":1,
                 "delta":0.01,
+                "self_supervise": False
                 }
-        pre_epochs = [50, 100, 200, 300]
+        pre_epochs = [10, 50, 100, 200, 300]
         pretrain_epochs = pre_epochs[np.random.randint(0, len(pre_epochs))]
         update_freq = [1, 50, 150, 200]
         update_interval = update_freq[np.random.randint(0, len(update_freq))]

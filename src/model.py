@@ -161,25 +161,33 @@ class LatentModel:
         smooth_loss = np.zeros(epochs)
         #writer = tf.summary.FileWriter("../loss_records/tensorboard/pretrain", sess.graph)
         to_feed = np.reshape(self.X, (self.X.shape[0], -1))
+        targets = [to_feed,]
+        if self.use_dd:
+            targets.append(self.dd_targets)
         earlystop = tf.keras.callbacks.EarlyStopping(
-             monitor='loss',
+             monitor='val_loss',
              patience=4,
              min_delta=1e-7
              )
 
+        print("n outputs", len(self.cae.outputs))
         history = self.cae.fit(
                 to_feed,
-                to_feed,
+                targets,
                 batch_size=minibatch_size,
                 epochs=epochs,
                 shuffle=True,
-                callbacks=[earlystop,]
+                callbacks=[earlystop,],
+                validation_split=0.1,
+                verbose=2
                 )
-
+        """
+        # commented out because multiple randomsearches would edit the same file
         json_model = self.cae.to_json()
         with open("../models/cae.json", "w") as fo:
             fo.write(json_model)
         self.cae.save_weights("../models/cae.weights.h5")
+        """
         return history
 
         for i in range(epochs):
@@ -891,12 +899,18 @@ class LatentModel:
         self.optimizer = optimizer
         grads = optimizer.compute_gradients(self.cost)
         if self.include_KM:
-            self.cae.compile(optimizer=optimizer, loss="mse")
+            loss = ["mse",]
+            loss_weights = [self.beta, ]
+            if self.use_dd:
+                loss.append("mse")
+                loss_weights.append(self.beta*self.lmbd)
+            print(loss)
+            self.cae.compile(optimizer=optimizer, loss=list(loss), loss_weights=[1, self.lmbd])
             self.dcec.compile(
-                        optimizer="adam",
-                        loss=["mse", "kld"],
-                        loss_weights=[self.beta, (1-self.beta)],
-                        )
+                optimizer="adam",
+                loss=loss+["kld"],
+                loss_weights=loss_weights + [1-self.beta]
+                )
         for i, (g, v) in enumerate(grads):
             if g is not None:
                 grads[i] = (tf.clip_by_norm(g, 5), v)

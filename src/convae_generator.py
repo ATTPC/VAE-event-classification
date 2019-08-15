@@ -31,7 +31,7 @@ class ConVaeGenerator(ModelGenerator):
         self.latent_types = ["include_KL", "include_MMD", None]
         self.activations = ["relu", "lrelu"]
         self.etas = np.logspace(-5, -1, 5)
-        self.lambdas = np.linspace(0.1, 200, 50)
+        self.lambdas = np.linspace(0.0, 200, 50)
         if self.train_clustering:
             self.betas = np.linspace(0, 1, 10)
         else:
@@ -39,6 +39,8 @@ class ConVaeGenerator(ModelGenerator):
         if self.use_vgg_repr:
             self.dense_layers = [1, 2, 3]
         self.ld = [3, 10, 20, 50, 100, 150, 200]
+        self.cl_ld = [2, 3, 5, 7, 9, 10, 20, 50, 100, 200]
+        self.reg_strengths = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10]
         #self.sd = [10, 50, 150]
         self.X = X
 
@@ -57,6 +59,7 @@ class ConVaeGenerator(ModelGenerator):
         beta1 = parameters_config[2]
         beta2 = parameters_config[3]
         latent_dim = parameters_config[4]
+        reg_strength = parameters_config[5]
         #sampling_dim = parameters_config[5]
 
         mode_config = config[2]
@@ -89,9 +92,12 @@ class ConVaeGenerator(ModelGenerator):
             config[1].append(n_dense)
         if self.use_dd:
             lmbd = self.lambdas[np.random.randint(0, len(self.lambdas))]
+            dense = np.random.randint(1, 3)
             model.lmbd = lmbd
             model.dd_targets = self.dd_targets
+            model.dd_dense = dense
             config[1].append(lmbd)
+            config[1].append(dense)
 
         opt = tf.train.AdamOptimizer
         opt_args =[eta,]

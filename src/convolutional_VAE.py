@@ -71,10 +71,10 @@ class ConVae(LatentModel):
 
     def _ModelGraph(
             self,
-            kernel_reg=reg.l1,
+            kernel_reg=reg.l2,
             kernel_reg_strength=0.01,
-            bias_reg=reg.l1,
-            bias_reg_strenght=0.01,
+            bias_reg=reg.l2,
+            bias_reg_strenght=0.00,
             activation="relu",
             output_activation="sigmoid",
             ):
@@ -216,6 +216,7 @@ class ConVae(LatentModel):
             sample = Lambda(
                         self.sampling,
                         output_shape=(self.latent_dim,),
+                        kernel_regularizer=k_reg,
                         name="sampler")([self.mean, self.var])
         else:
             sample = Dense(
@@ -238,7 +239,6 @@ class ConVae(LatentModel):
         self.z_seq = [sample,]
         self.dec_state_seq = []
         #self.encoder = Model(in_layer, [self.mean, self.var, sample], name="encoder")
-        
         if self.use_dd:
             self.dd_reconst = self.dueling_decoder(sample, activations[activation])
         # %%
@@ -359,10 +359,14 @@ class ConVae(LatentModel):
         else:
             decoder_out = tf.keras.layers.Reshape((self.n_input,))(decoder_out)
 
-        self.cae = Model(inputs=self.x, outputs=decoder_out)
+        output_list = [decoder_out,]
+        if self.use_dd:
+            output_list.append(self.dd_reconst)
+        self.cae = Model(inputs=self.x, outputs=list(output_list))
         print(self.cae.summary())
         if self.include_KM:
-            self.dcec = Model(inputs=self.x, outputs=[decoder_out, self.q])
+            output_list.append(self.q)
+            self.dcec = Model(inputs=self.x, outputs=output_list)
             #print(self.dcec.summary())
 
         self.output = decoder_out

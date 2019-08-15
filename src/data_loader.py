@@ -182,6 +182,19 @@ def load_realevent_netcharge(size, event="0210"):
     run = run.reshape((-1, 1)) 
     lab_run = lab_run.reshape((-1, 1)) 
     return run, lab_run
+
+def load_simulated_hist(size, event="0210"):
+    run = np.load("../data/simulated/q_histograms/pr_train_simulated.npy")
+    lab_run = np.load("../data/simulated/q_histograms/pr_test_simulated.npy")
+    return np.concatenate([run, lab_run], axis=0), lab_run
+
+def load_simulated_netcharge(size, event="0210"):
+    run = np.load("../data/simulated/net_charge/pr_train_simulated.npy")
+    lab_run = np.load("../data/simulated/net_charge/pr_test_simulated.npy")
+    run = run.reshape((-1, 1)) 
+    lab_run = lab_run.reshape((-1, 1)) 
+    return np.concatenate([run, lab_run], axis=0), lab_run
+
 if __name__ == "__main__":
     #file_location = "~/Documents/github/VAE-event-classification/data/real/packaged/x-y/proton-carbon-junk-noise.h5"
     #a = DataLoader(file_location)
