@@ -65,9 +65,9 @@ class ConVae(LatentModel):
         self.strides_architecture = strides_architecture
         self.pooling_architecture = pooling_architecture
 
-        if self.include_KM and clustering_config == None:
+        if self.include_KM and clustering_config is None:
             raise RuntimeError("when KM is true a config must be supplied")
-        elif self.include_KM and clustering_config != None:
+        elif self.include_KM and clustering_config is not None:
             for key, val in clustering_config.items():
                 setattr(self, key, val)
 
