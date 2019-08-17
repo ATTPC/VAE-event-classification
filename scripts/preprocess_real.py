@@ -1,11 +1,14 @@
 import numpy as np
-import h5py 
+import h5py
 from skimage import util
 
 which = "0210"
 
-with h5py.File("../data/proton-carbon-junk-noise-unlabeled-"+which+".h5", "r") as fo:
+with h5py.File(
+    "../data/proton-carbon-junk-noise-unlabeled-" + which + ".h5", "r"
+) as fo:
     X_train = np.array(fo["images"])
+
 
 def rgb2gray(rgb):
 
@@ -15,7 +18,7 @@ def rgb2gray(rgb):
     return gray
 
 
-X_train = rgb2gray(X_train)/255
+X_train = rgb2gray(X_train) / 255
 
 for i, x in enumerate(X_train):
     X_train[i] = util.invert(x)
@@ -31,6 +34,6 @@ X_train[threshhold_indices_train] = 0
 
 X_train = X_train.reshape(X_train.shape + (1,))
 
-t_fn = "../data/processed/all_"+which+".npy"
+t_fn = "../data/processed/all_" + which + ".npy"
 
 np.save(t_fn, X_train)

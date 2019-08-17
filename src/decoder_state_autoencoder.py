@@ -24,8 +24,8 @@ if not latent_repr:
     X_train = np.squeeze(X_train[:, 1, :, :])
 
 original_dim = X_train.shape
-X_train = X_train.reshape((original_dim[0]*original_dim[1], original_dim[2]))
-print(np.std(X_train), )
+X_train = X_train.reshape((original_dim[0] * original_dim[1], original_dim[2]))
+print(np.std(X_train))
 
 if latent_repr:
     encoding_architecture = [60, 40, 30, 10]
@@ -33,45 +33,55 @@ else:
     encoding_architecture = [1200, 600, 100, 50]
 
 x = Input(batch_shape=(batch_size, X_train.shape[1]))
-h = Dense(encoding_architecture[0], activation="tanh",
-        #kernel_constraint=constraints.MinMaxNorm(
-        #    min_value=encoding_architecture[0]/10, 
-        #    max_value=encoding_architecture[0]*5,
-        #    rate=1.0,
-        #    axis=0),
-        kernel_regularizer = regularizers.l1(0.5),
-        )(x)
+h = Dense(
+    encoding_architecture[0],
+    activation="tanh",
+    # kernel_constraint=constraints.MinMaxNorm(
+    #    min_value=encoding_architecture[0]/10,
+    #    max_value=encoding_architecture[0]*5,
+    #    rate=1.0,
+    #    axis=0),
+    kernel_regularizer=regularizers.l1(0.5),
+)(x)
 
 for layer in encoding_architecture[1:]:
-    h = Dense(layer, activation="tanh",
-                # kernel_constraint=constraints.MinMaxNorm(min_value=layer/10, max_value=layer*5, rate=1.0, axis=0),
-                kernel_regularizer=regularizers.l1(0.5),
-            )(h)
+    h = Dense(
+        layer,
+        activation="tanh",
+        # kernel_constraint=constraints.MinMaxNorm(min_value=layer/10, max_value=layer*5, rate=1.0, axis=0),
+        kernel_regularizer=regularizers.l1(0.5),
+    )(h)
 
-embedded = Dense(latent_dim, activation="linear", 
-        use_bias=False,
-        #kernel_constraint=constraints.MinMaxNorm(min_value=1, max_value=100, rate=1.0, axis=0),
-            )(h)
+embedded = Dense(
+    latent_dim,
+    activation="linear",
+    use_bias=False,
+    # kernel_constraint=constraints.MinMaxNorm(min_value=1, max_value=100, rate=1.0, axis=0),
+)(h)
 
 encoder = Model(x, embedded)
 
-d = Dense(encoding_architecture[-1], activation="selu",
-        #kernel_constraint=constraints.MinMaxNorm(
-        #    min_value=encoding_architecture[-1]/10,
-        #    max_value=encoding_architecture[-1]*5,
-        #    rate=1.0,
-        #    axis=0),
-        kernel_regularizer = regularizers.l1(0.5),
-        )(embedded)
+d = Dense(
+    encoding_architecture[-1],
+    activation="selu",
+    # kernel_constraint=constraints.MinMaxNorm(
+    #    min_value=encoding_architecture[-1]/10,
+    #    max_value=encoding_architecture[-1]*5,
+    #    rate=1.0,
+    #    axis=0),
+    kernel_regularizer=regularizers.l1(0.5),
+)(embedded)
 
 decoding_architecture = encoding_architecture[:-1]
 decoding_architecture.reverse()
 
 for layer in decoding_architecture:
-    d = Dense(layer, activation="tanh",
-        #kernel_constraint=constraints.MinMaxNorm(min_value=layer/10, max_value=layer*5, rate=1.0, axis=0),
+    d = Dense(
+        layer,
+        activation="tanh",
+        # kernel_constraint=constraints.MinMaxNorm(min_value=layer/10, max_value=layer*5, rate=1.0, axis=0),
         kernel_regularizer=regularizers.l1(0.5),
-            )(d)
+    )(d)
 
 
 out = Dense(X_train.shape[1], activation="linear")(d)
@@ -86,12 +96,14 @@ autoencoder.compile(optimizer=adadelta, loss="mean_squared_error")
 noised_X = X_train + np.random.normal(loc=0, scale=0.01, size=X_train.shape)
 print(noised_X.shape)
 
-autoencoder.fit(noised_X, X_train,
-        shuffle=True,
-        epochs=epochs,
-        batch_size=batch_size,
-        validation_data=(X_train, X_train)
-        )
+autoencoder.fit(
+    noised_X,
+    X_train,
+    shuffle=True,
+    epochs=epochs,
+    batch_size=batch_size,
+    validation_data=(X_train, X_train),
+)
 
 encoded_states = encoder.predict(noised_X)
 encoded_states = encoded_states.reshape((original_dim[0], original_dim[1], latent_dim))

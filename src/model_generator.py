@@ -2,31 +2,33 @@ import numpy as np
 import tensorflow as tf
 
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.metrics import  adjusted_rand_score, normalized_mutual_info_score
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 
 from latent_classifier import test_model
 
 import sys
+
 sys.path.append("../scripts")
 import run
 
+
 class ModelGenerator:
     def __init__(
-            self,
-            model,
-            use_vgg_repr = False,
-            target_images=None,
-            use_dd=False,
-            dd_targets=None,
-            ):
+        self,
+        model,
+        use_vgg_repr=False,
+        target_images=None,
+        use_dd=False,
+        dd_targets=None,
+    ):
         self.use_vgg_repr = use_vgg_repr
         if self.use_vgg_repr and target_images is None:
             raise ValueError("When using vgg reprsentation, must supply target images")
-        self.use_dd = use_dd 
+        self.use_dd = use_dd
         if self.use_dd and dd_targets is None:
             raise ValueError("When using dual decoders, must supply alt. repr")
         self.dd_targets = dd_targets
-        self.target_images = target_images 
+        self.target_images = target_images
         self.hyperparam_vals = []
         self.loss_vals = []
         self.performance_vals = []
@@ -41,7 +43,7 @@ class ModelGenerator:
     def sample_hyperparameters(self,):
         config = []
         n_layers = np.random.randint(3, self.max_layers)
-        #n_layers = 7
+        # n_layers = 7
         valid_conv_out = 1
         input_dim = self.X.shape[1]
         conv_config = self._generate_conv_config(n_layers)
@@ -49,15 +51,15 @@ class ModelGenerator:
         parameters_config = self._generate_param_config()
         n_latent_types = len(self.latent_types)
         mode_config = {
-                "simulated_mode": False,
-                "restore_mode": False,
-                "include_KL": False,
-                "include_MMD": False,
-                "include_KM": False,
-                "batchnorm":False,
-                "use_vgg": self.use_vgg_repr,
-                "use_dd": self.use_dd
-                }
+            "simulated_mode": False,
+            "restore_mode": False,
+            "include_KL": False,
+            "include_MMD": False,
+            "include_KM": False,
+            "batchnorm": False,
+            "use_vgg": self.use_vgg_repr,
+            "use_dd": self.use_dd,
+        }
 
         if self.train_clustering:
             mode_config["include_KM"] = True
@@ -68,7 +70,7 @@ class ModelGenerator:
                 mode_config[latent] = True
             clustering_config = {}
 
-        use_bm = np.random.randint(0,2)
+        use_bm = np.random.randint(0, 2)
         if use_bm:
             mode_config["batchnorm"] = True
 
@@ -86,85 +88,87 @@ class ModelGenerator:
         latent_dim = self.ld[np.random.randint(0, len(self.ld))]
         if self.train_clustering:
             latent_dim = self.cl_ld[np.random.randint(0, len(self.cl_ld))]
-        #sampling_dim = self.sd[np.random.randint(0, len(self.sd))]
+        # sampling_dim = self.sd[np.random.randint(0, len(self.sd))]
         reg_strength = self.reg_strengths[np.random.randint(0, len(self.reg_strengths))]
         parameters_config = [
-                beta,
-                eta,
-                beta1,
-                beta2,
-                latent_dim,
-                #sampling_dim,
-                reg_strength
-                ]
+            beta,
+            eta,
+            beta1,
+            beta2,
+            latent_dim,
+            # sampling_dim,
+            reg_strength,
+        ]
         return parameters_config
 
     def _generate_conv_config(self, n_layers):
         if self.architecture == "vgg":
-            strides_arcitecture = [1]*n_layers
-            kernel_architecture = [3]*n_layers
+            strides_arcitecture = [1] * n_layers
+            kernel_architecture = [3] * n_layers
             filter_architecture = self._make_vgg_filters(kernel_architecture)
             pooling_config = self._make_vgg_pooling_config(n_layers)
         elif self.architecture == "static":
             n_layers = 4
-            strides_arcitecture = [2]*n_layers
+            strides_arcitecture = [2] * n_layers
             kernel_architecture = [5, 5, 3, 3]
             filter_architecture = self._make_filter_config(kernel_architecture)
-            pooling_config = [0]*n_layers
+            pooling_config = [0] * n_layers
         elif self.architecture == "ours":
-            strides_arcitecture = [2]*n_layers#np.random.randint(1, 3, size=n_layers)
+            strides_arcitecture = [
+                2
+            ] * n_layers  # np.random.randint(1, 3, size=n_layers)
             kernel_architecture = self._make_kernel_config(n_layers)
             filter_architecture = self._make_filter_config(kernel_architecture)
             pooling_config = self._make_pooling_config(n_layers)
 
         conv_config = [
-                filter_architecture,
-                kernel_architecture,
-                strides_arcitecture,
-                pooling_config,
-                n_layers,
-                ]
+            filter_architecture,
+            kernel_architecture,
+            strides_arcitecture,
+            pooling_config,
+            n_layers,
+        ]
         return conv_config
-    
+
     def _make_vgg_filters(self, kernel_architecture):
         n_layers = len(kernel_architecture)
-        base_filters = 2**np.random.randint(1, 4)
-        filter_architecture = np.array([base_filters]*n_layers)
+        base_filters = 2 ** np.random.randint(1, 4)
+        filter_architecture = np.array([base_filters] * n_layers)
         where_double = [2, 4, 7, 10, 13]
 
         for i in range(n_layers):
             if i in where_double:
                 filter_architecture[i:] *= 2
 
-        return filter_architecture 
+        return filter_architecture
 
     def _make_pooling_config(self, n_layers):
-        #pooling_conf = np.random.randint(0, 2, n_layers)
-        pooling_conf = [0]*n_layers
+        # pooling_conf = np.random.randint(0, 2, n_layers)
+        pooling_conf = [0] * n_layers
         return pooling_conf
 
     def _make_vgg_pooling_config(self, n_layers):
-        pooling_config = [0]*n_layers
-        where_pool = np.array([2, 5, 7, 10, 13])-1
+        pooling_config = [0] * n_layers
+        where_pool = np.array([2, 5, 7, 10, 13]) - 1
 
         for i in range(n_layers):
             if i in where_pool:
                 pooling_config[i] = 1
 
-        return pooling_config 
+        return pooling_config
 
-    def _generate_clustering_config(self, ):
+    def _generate_clustering_config(self,):
         clustering_config = {
-                "n_clusters": self.n_classes,
-                "alpha":1,
-                "delta":0.01,
-                "self_supervise": False
-                }
+            "n_clusters": self.n_classes,
+            "alpha": 1,
+            "delta": 0.01,
+            "self_supervise": False,
+        }
         pre_epochs = [10, 50, 100, 200, 300]
         pretrain_epochs = pre_epochs[np.random.randint(0, len(pre_epochs))]
         update_freq = [1, 50, 150, 200]
         update_interval = update_freq[np.random.randint(0, len(update_freq))]
-        #pretrain_sim = np.random.randint(0, 2)
+        # pretrain_sim = np.random.randint(0, 2)
         pretrain_sim = 0
         if self.n_classes == 2:
             pretrain_sim = 0
@@ -175,7 +179,7 @@ class ModelGenerator:
             oh = OneHotEncoder(sparse=False)
             y_sim = oh.fit_transform(y_sim.reshape(-1, 1))
             if self.n_classes > len(np.unique(y_sim)):
-                tmp = np.zeros(np.array(y_sim.shape) + [0, 1]) 
+                tmp = np.zeros(np.array(y_sim.shape) + [0, 1])
                 tmp[:, :-1] = y_sim
                 y_sim = tmp
             clustering_config["X_c"] = X_sim
@@ -191,13 +195,13 @@ class ModelGenerator:
         filter_architecture = []
         max_exp = 6
         filter_exp = np.random.randint(3, max_exp)
-        n_filters= 2**filter_exp
+        n_filters = 2 ** filter_exp
         k = kernel_architecture[0]
 
         for i in range(n_layers):
             if kernel_architecture[i] != k:
                 k = kernel_architecture[i]
-                n_filters = 2**np.random.randint(filter_exp, max_exp) 
+                n_filters = 2 ** np.random.randint(filter_exp, max_exp)
                 filter_exp += 1
                 filter_architecture.append(n_filters)
             else:
@@ -206,8 +210,8 @@ class ModelGenerator:
         return filter_architecture
 
     def _make_kernel_config(self, n_layers):
-        kernel_sizes = np.array([17,15 ,13, 11, 9, 7, 5, 3])
-        kernel_sizes = kernel_sizes[np.random.randint(0, len(kernel_sizes)-1):]
+        kernel_sizes = np.array([17, 15, 13, 11, 9, 7, 5, 3])
+        kernel_sizes = kernel_sizes[np.random.randint(0, len(kernel_sizes) - 1) :]
         available_layers = n_layers
         n_of_each_kernel = []
 
@@ -221,23 +225,23 @@ class ModelGenerator:
 
         kernel_architecture = []
         for i, n in enumerate(n_of_each_kernel):
-            kernel_architecture += [kernel_sizes[i]]*n
+            kernel_architecture += [kernel_sizes[i]] * n
 
         return kernel_architecture
 
-    def fit_model(self, model, batch_size,):
+    def fit_model(self, model, batch_size):
         self.sess = tf.InteractiveSession()
         with open("../scripts/run.py", "w") as fo:
             fo.write("run={}".format(run.run + 1))
         lx, lz = model.train(
-                    self.sess,
-                    200,
-                    batch_size,
-                    earlystopping=True,
-                    run=self.init_run,
-                    save_checkpoints=False,
-                    verbose=1,
-                )
+            self.sess,
+            200,
+            batch_size,
+            earlystopping=True,
+            run=self.init_run,
+            save_checkpoints=False,
+            verbose=1,
+        )
         self.loss_vals.append((lx, lz))
         self.init_run += 1
         return lx, lz
@@ -253,11 +257,13 @@ class ModelGenerator:
         self.performance_vals.append(perf)
         return perf
 
-
     @classmethod
     def conv_out(self, conv_config, w):
-        def o(w, k, s): return np.floor((w - k + (k-1)/2)/s + 1)
-        def to(w, k, s): return np.ceil((w-1)*s + 1)
+        def o(w, k, s):
+            return np.floor((w - k + (k - 1) / 2) / s + 1)
+
+        def to(w, k, s):
+            return np.ceil((w - 1) * s + 1)
 
         filter_a = conv_config[0]
         kernel_a = conv_config[1]
@@ -282,7 +288,7 @@ class ModelGenerator:
             k = kernel_a[l]
             s = strides_a[l]
             w = to(w, k, s)
-        
+
         if w == to_compare:
             return 0
         else:

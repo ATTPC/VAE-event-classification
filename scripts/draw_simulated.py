@@ -1,4 +1,5 @@
 import sys
+
 sys.path.append("../src")
 
 import numpy as np
@@ -6,6 +7,7 @@ import tensorflow as tf
 
 import matplotlib.pyplot as plt
 import matplotlib
+
 matplotlib.use("Agg")
 
 from draw import DRAW
@@ -40,40 +42,27 @@ array_delta_r.fill(delta_read)
 array_delta_r = array_delta_r.astype(np.float32)
 
 attn_config = {
-            "read_N": read_N,
-            "write_N": write_N,
-            "write_N_sq": write_N**2,
-            "delta_w": array_delta_w,
-            "delta_r": array_delta_r,
-        }
+    "read_N": read_N,
+    "write_N": write_N,
+    "write_N_sq": write_N ** 2,
+    "delta_w": array_delta_w,
+    "delta_r": array_delta_r,
+}
 
 
 draw_model = DRAW(
-        T,
-        dec_size,
-        enc_size,
-        latent_dim,
-        batch_size,
-        train_data,
-        attn_config=attn_config
-        )
+    T, dec_size, enc_size, latent_dim, batch_size, train_data, attn_config=attn_config
+)
 
-graph_kwds = {
-        "initializer": tf.initializers.glorot_normal
-        }
+graph_kwds = {"initializer": tf.initializers.glorot_normal}
 
-loss_kwds = {
-        "reconst_loss": None,
-        "include_KL":False
-        }
+loss_kwds = {"reconst_loss": None, "include_KL": False}
 
 draw_model.CompileModel(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
-opt_args = [1e-2,]
-opt_kwds = {
-        "beta1": 0.5,
-        }
+opt_args = [1e-2]
+opt_kwds = {"beta1": 0.5}
 
 draw_model.computeGradients(opt, opt_args, opt_kwds)
 
@@ -82,7 +71,7 @@ sess = tf.InteractiveSession()
 data_dir = "../drawing"
 model_dir = "../models"
 
-lx, lz, = draw_model.train(sess, epochs, data_dir, model_dir, )
+lx, lz, = draw_model.train(sess, epochs, data_dir, model_dir)
 
 draw_model.generateLatent(sess, "../drawing", (train_data, test_data))
 
@@ -99,5 +88,4 @@ axs[1].plot(range(epochs), lz, label=r"$\mathcal{L}_z$")
 [a.legend() for a in axs]
 [a.set_ylim((1000, 200)) for a in axs]
 
-fig.savefig(
-    "../plots/simulated_loss_functions.png")
+fig.savefig("../plots/simulated_loss_functions.png")

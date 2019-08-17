@@ -1,7 +1,7 @@
-import tensorflow as tf 
+import tensorflow as tf
 import numpy as np
 
-from sklearn.metrics import  adjusted_rand_score, normalized_mutual_info_score
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 from sklearn.preprocessing import OneHotEncoder
 
 from model_generator import ModelGenerator
@@ -9,19 +9,15 @@ from draw import DRAW
 from convae_generator import ConVaeGenerator
 
 import sys
+
 sys.path.append("../scripts")
 import run
 
 
 class DRAWGenerator(ModelGenerator):
     def __init__(
-            self,
-            X,
-            n_classes=3,
-            labelled_data=None,
-            clustering=True,
-            architecture="vgg",
-            ):
+        self, X, n_classes=3, labelled_data=None, clustering=True, architecture="vgg"
+    ):
         super().__init__(DRAW)
         self.architecture = architecture
         self.train_clustering = clustering
@@ -41,11 +37,11 @@ class DRAWGenerator(ModelGenerator):
         self.deltas = np.linspace(0.5, 1.3, 50)
         self.N = [5, 12, 20, 40, 60]
         self.T = [3, 6, 10, 20, 40]
-        #self.sd = [10, 50, 150]
+        # self.sd = [10, 50, 150]
         self.X = X
 
     def _make_model(self,):
-        rw_type = self.read_write[np.random.randint(0,2)]
+        rw_type = self.read_write[np.random.randint(0, 2)]
         config = self.sample_hyperparameters()
         T = self.T[np.random.randint(0, len(self.T))]
         dec_size = self.recurrent_dim[np.random.randint(0, len(self.recurrent_dim))]
@@ -62,13 +58,13 @@ class DRAWGenerator(ModelGenerator):
             conv = True
             cc = config[0]
             conv_architecture = {
-                    "filters": cc[0],
-                    "kernel_size": cc[1],
-                    "strides": cc[2],
-                    "pool": cc[3],
-                    "activation": [1,]*cc[4],
-                    "n_layers": cc[4],
-                    }
+                "filters": cc[0],
+                "kernel_size": cc[1],
+                "strides": cc[2],
+                "pool": cc[3],
+                "activation": [1] * cc[4],
+                "n_layers": cc[4],
+            }
             act_func = self.activations[np.random.randint(0, len(self.activations))]
             conv_architecture["activation_func"] = act_func
             attn_config = {}
@@ -83,34 +79,31 @@ class DRAWGenerator(ModelGenerator):
         mode_config = config[2]
         clustering_config = config[3]
 
-        loss = ["mse", None][np.random.randint(0,2)]
-        loss_kwds = {"reconst_loss":loss}
+        loss = ["mse", None][np.random.randint(0, 2)]
+        loss_kwds = {"reconst_loss": loss}
         if loss == "mse":
             beta /= 1e3
 
         model = self.model(
-                T,
-                dec_size,
-                enc_size,
-                latent_dim,
-                self.X,
-                beta=beta,
-                train_classifier=False,
-                use_conv=conv,
-                conv_architecture=conv_architecture,
-                use_attention=attn,
-                attn_config=attn_config,
-                mode_config=mode_config,
-                clustering_config=clustering_config,
-                labelled_data=self.labelled_data
-                )
+            T,
+            dec_size,
+            enc_size,
+            latent_dim,
+            self.X,
+            beta=beta,
+            train_classifier=False,
+            use_conv=conv,
+            conv_architecture=conv_architecture,
+            use_attention=attn,
+            attn_config=attn_config,
+            mode_config=mode_config,
+            clustering_config=clustering_config,
+            labelled_data=self.labelled_data,
+        )
 
         opt = tf.train.AdamOptimizer
-        opt_args =[eta,]
-        opt_kwds = {
-                "beta1":beta1,
-                "beta2":beta2
-                }
+        opt_args = [eta]
+        opt_kwds = {"beta1": beta1, "beta2": beta2}
 
         if not conv:
             activation = self.activations[np.random.randint(0, len(self.activations))]
@@ -121,10 +114,10 @@ class DRAWGenerator(ModelGenerator):
         config.append(activation)
         config.append([T, dec_size, enc_size])
         graph_kwds = {
-                "activation":activation,
-                "n_encoder_cells": 1,
-                "n_decoder_cells": 1,
-                }
+            "activation": activation,
+            "n_encoder_cells": 1,
+            "n_decoder_cells": 1,
+        }
 
         model.compile_model(graph_kwds=graph_kwds, loss_kwds=loss_kwds)
         model.compute_gradients(opt, opt_args, opt_kwds)
@@ -138,11 +131,10 @@ class DRAWGenerator(ModelGenerator):
         write_N = self.N[np.random.randint(0, len(self.N))]
 
         attn_config = {
-                "read_N": read_N,
-                "write_N": write_N,
-                "write_N_sq": write_N**2,
-                "delta_w": delta_w,
-                "delta_r": delta_r,
-                }
-        return attn_config 
-
+            "read_N": read_N,
+            "write_N": write_N,
+            "write_N_sq": write_N ** 2,
+            "delta_w": delta_w,
+            "delta_r": delta_r,
+        }
+        return attn_config

@@ -1,4 +1,5 @@
 import sys
+
 sys.path.append("../src")
 from convolutional_VAE import ConVae
 from data_loader import load_simulated, load_clean, load_real
@@ -13,6 +14,7 @@ import os
 import tensorflow as tf
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
@@ -31,13 +33,13 @@ elif data == "clean":
 elif data == "real":
     x_train, x_test, y_test = load_real(128)
 elif data == "vgg_clean":
-    vgg_x_train, x_train, x_test, y_test = load_clean_vgg(size) 
+    vgg_x_train, x_train, x_test, y_test = load_clean_vgg(size)
 elif data == "vgg_real":
-    vgg_x_train, x_train, x_test, y_test = load_real_vgg(size) 
+    vgg_x_train, x_train, x_test, y_test = load_real_vgg(size)
     x_train = x_train.reshape((x_train.shape[0], -1))
-#n_samp = 10000
-#x_train = x_train[0:n_samp]
-#vgg_x_train = vgg_x_train[0:n_samp]
+# n_samp = 10000
+# x_train = x_train[0:n_samp]
+# vgg_x_train = vgg_x_train[0:n_samp]
 
 n_layers = 2
 filter_architecture = [32, 32, 32, 32, 32]
@@ -46,14 +48,14 @@ strides_architecture = [2, 2, 2, 2, 2]
 pool_architecture = [0, 0, 0, 0, 0]
 
 mode_config = {
-        "simulated_mode": False,
-        "restore_mode": False,
-        "include_KL": False,
-        "include_MMD": False,
-        "include_KM": False,
-        "batchnorm": True,
-        "use_vgg": False 
-        }
+    "simulated_mode": False,
+    "restore_mode": False,
+    "include_KL": False,
+    "include_MMD": False,
+    "include_KM": False,
+    "batchnorm": True,
+    "use_vgg": False,
+}
 
 experiments = 1
 lxs = []
@@ -61,45 +63,38 @@ lzs = []
 train_perf = []
 test_perf = []
 
-for i in range(experiments): 
+for i in range(experiments):
     epochs = 2000
     latent_dim = 1000
     batch_size = 150
     print("experiment: ", i)
 
     cvae = ConVae(
-            n_layers,
-            filter_architecture,
-            kernel_architecture,
-            strides_architecture,
-            pool_architecture,
-            latent_dim,
-            x_train,
-            beta=0,
-            mode_config=mode_config,
-            labelled_data=[x_test, y_test]
-            )
-    #cvae.target_imgs = x_train
+        n_layers,
+        filter_architecture,
+        kernel_architecture,
+        strides_architecture,
+        pool_architecture,
+        latent_dim,
+        x_train,
+        beta=0,
+        mode_config=mode_config,
+        labelled_data=[x_test, y_test],
+    )
+    # cvae.target_imgs = x_train
 
-    graph_kwds = {"activation":"lrelu", "output_activation":None}
+    graph_kwds = {"activation": "lrelu", "output_activation": None}
     loss_kwds = {"reconst_loss": "mse"}
     cvae.compile_model(graph_kwds, loss_kwds)
 
     opt = tf.train.AdamOptimizer
-    opt_args = [1e-2, ]
-    opt_kwds = {
-        "beta1": 0.65,
-    }
-    cvae.compute_gradients(opt,)
-    sess = tf.InteractiveSession() 
+    opt_args = [1e-2]
+    opt_kwds = {"beta1": 0.65}
+    cvae.compute_gradients(opt)
+    sess = tf.InteractiveSession()
     lx, lz = cvae.train(
-            sess,
-            epochs,
-            batch_size,
-            earlystopping=True,
-            save_checkpoints=1,
-            verbose=1
-            )
+        sess, epochs, batch_size, earlystopping=True, save_checkpoints=1, verbose=1
+    )
     p = test_model(x_test, y_test, cvae, sess)
     sess.close()
 
@@ -109,7 +104,7 @@ for i in range(experiments):
     train_perf.append(p[0])
     test_perf.append(p[1])
     print()
-    print("ITER NUMBER ", i )
+    print("ITER NUMBER ", i)
     [print(i) for i in p[0]]
     print("-----------")
     [print(i) for i in p[1]]

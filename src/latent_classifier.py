@@ -2,51 +2,44 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import f1_score, confusion_matrix, accuracy_score
-from sklearn.model_selection import  cross_val_score, train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
+
 
 def longform_latent(latent,):
-    longform_samples = np.zeros((
-                        latent.shape[1], 
-                        latent.shape[0]*latent.shape[2]
-                        ))
+    longform_samples = np.zeros((latent.shape[1], latent.shape[0] * latent.shape[2]))
 
     latent_dim = latent.shape[2]
 
     for i, evts in enumerate(latent):
-        longform_samples[:, i*latent_dim:(i+1)*latent_dim] = evts
+        longform_samples[:, i * latent_dim : (i + 1) * latent_dim] = evts
 
     return longform_samples
 
 
-def fit_logreg(X, y,):
+def fit_logreg(X, y):
 
     model = LogisticRegression(
-            penalty="l2",
-            solver="newton-cg",
-            multi_class="multinomial",
-            class_weight="balanced",
-            max_iter=10000,
-        )
+        penalty="l2",
+        solver="newton-cg",
+        multi_class="multinomial",
+        class_weight="balanced",
+        max_iter=10000,
+    )
 
     model.fit(X, y)
-    #train_score = f1_score(y, model.predict(X), average=None)
-    #test_score = f1_score(ytest, model.predict(Xtest), average=None)
-    return model 
+    # train_score = f1_score(y, model.predict(X), average=None)
+    # test_score = f1_score(ytest, model.predict(Xtest), average=None)
+    return model
+
 
 def test_model(X, y, model, sess):
-    latent_test = model.run_large(
-                                sess,
-                                model.z_seq,
-                                X,
-                                )
+    latent_test = model.run_large(sess, model.z_seq, X)
     np.save("../drawing/latent/test_latent.npy", latent_test)
     latent_test = np.array(latent_test)
     latent_test = longform_latent(latent_test)
     lr_train, lr_test, lry_train, lry_test = train_test_split(
-            latent_test,
-            y,
-            train_size=0.65
-            )
+        latent_test, y, train_size=0.65
+    )
     try:
         lr_model = fit_logreg(lr_train, lry_train.argmax(-1))
         pred_train = lr_model.predict(lr_train)
@@ -65,22 +58,19 @@ def test_model(X, y, model, sess):
     train_cm = confusion_matrix(lry_train.argmax(-1), pred_train)
     test_cm = confusion_matrix(lry_test.argmax(-1), pred_test)
 
-    train_recall = train_cm.diagonal()/train_cm.sum(axis=1)
-    test_recall = test_cm.diagonal()/test_cm.sum(axis=1)
-    train_precision = train_cm.diagonal()/train_cm.sum(axis=0)
-    test_precision = test_cm.diagonal()/test_cm.sum(axis=0)
+    train_recall = train_cm.diagonal() / train_cm.sum(axis=1)
+    test_recall = test_cm.diagonal() / test_cm.sum(axis=1)
+    train_precision = train_cm.diagonal() / train_cm.sum(axis=0)
+    test_precision = test_cm.diagonal() / test_cm.sum(axis=0)
 
     train_score = [train_f1, train_recall, train_precision]
     test_score = [test_f1, test_recall, test_precision]
 
     return train_score, test_score
 
+
 def performance_by_samples(X, y, model, sess):
-    latent_test = model.run_large(
-                                sess,
-                                model.z_seq,
-                                X,
-                                )
+    latent_test = model.run_large(sess, model.z_seq, X)
     np.save("../drawing/latent/test_latent.npy", latent_test)
     latent_test = np.array(latent_test)
     latent_test = longform_latent(latent_test)
@@ -91,7 +81,7 @@ def performance_by_samples(X, y, model, sess):
     repeats = 10
     for i, p in enumerate(percentages):
         perf = np.zeros(repeats)
-        for j in  range(repeats):
+        for j in range(repeats):
             n = int(np.ceil(n_samples * p))
             which = np.random.randint(0, n_samples, size=n)
             x_t = lr_train[which]
@@ -103,4 +93,3 @@ def performance_by_samples(X, y, model, sess):
 
         performance[i] = [perf.mean(), perf.std()]
     return performance, percentages
-

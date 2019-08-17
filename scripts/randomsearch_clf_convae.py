@@ -3,6 +3,7 @@ import numpy as np
 import os
 
 import sys
+
 sys.path.append("../src")
 from convae_generator import ConVaeGenerator
 from randomsearch import RandomSearch
@@ -29,7 +30,7 @@ elif data == "realevent":
     which = "0210"
     x_train, x_test, y_test = dl.load_real_event(size, which)
     if use_dd:
-        #q_hist_x_train, q_hist_x_test = dl.load_realevent_hist(size)
+        # q_hist_x_train, q_hist_x_test = dl.load_realevent_hist(size)
         q_hist_x_train, q_hist_x_test = dl.load_realevent_netcharge(size)
         print(q_hist_x_train.shape)
 elif data == "cleanevent":
@@ -49,32 +50,40 @@ else:
     x_train, x_test, y_test = dl.load_clean(size)
 
 n = 1000
-savedir = "../results/randomsearch_convae_"+data+"_"+size+"_"+method+"/run_{}".format(run)
+savedir = (
+    "../results/randomsearch_convae_"
+    + data
+    + "_"
+    + size
+    + "_"
+    + method
+    + "/run_{}".format(run)
+)
 with open("randomsearch_run.py", "w") as fo:
-    fo.write("run={}".format(run+1))
+    fo.write("run={}".format(run + 1))
 
 if use_vgg:
     rs = RandomSearch(
-            vgg_x_train,
-            x_test,
-            y_test,
-            ConVaeGenerator,
-            clustering=False,
-            architecture="ours",
-            use_vgg_repr=use_vgg,
-            target_images=x_train,
-            use_dd=use_dd,
-            dd_targets=q_hist_x_train
-            )
+        vgg_x_train,
+        x_test,
+        y_test,
+        ConVaeGenerator,
+        clustering=False,
+        architecture="ours",
+        use_vgg_repr=use_vgg,
+        target_images=x_train,
+        use_dd=use_dd,
+        dd_targets=q_hist_x_train,
+    )
 else:
     rs = RandomSearch(
-            x_train,
-            x_test,
-            y_test,
-            ConVaeGenerator,
-            clustering=False,
-            architecture=architecture,
-            use_dd=use_dd,
-            dd_targets=q_hist_x_train
-            )
+        x_train,
+        x_test,
+        y_test,
+        ConVaeGenerator,
+        clustering=False,
+        architecture=architecture,
+        use_dd=use_dd,
+        dd_targets=q_hist_x_train,
+    )
 rs.search(n, 150, savedir)

@@ -15,17 +15,16 @@ test_simulated = np.load(test_simulated)
 nonzero_train = np.nonzero(train_simulated)
 nonzero_test = np.nonzero(test_simulated)
 
-all_nonzero = np.concatenate([
-                train_simulated[nonzero_train],
-                test_simulated[nonzero_test],    
-                ], axis = 0)
+all_nonzero = np.concatenate(
+    [train_simulated[nonzero_train], test_simulated[nonzero_test]], axis=0
+)
 maxval = np.max(all_nonzero)
 minval = np.min(all_nonzero)
 
-b = (0.1 - minval/maxval) * (1 / (1 - minval/maxval))
-a = 1/maxval - b/maxval
+b = (0.1 - minval / maxval) * (1 / (1 - minval / maxval))
+a = 1 / maxval - b / maxval
 
-unitmap = lambda x: a*x + b 
+unitmap = lambda x: a * x + b
 
 train_simulated[nonzero_train] = unitmap(train_simulated[nonzero_train])
 test_simulated[nonzero_test] = unitmap(test_simulated[nonzero_test])
@@ -36,6 +35,7 @@ np.save("../data/simulated/pr_test_simulated.npy", test_simulated)
 sys.exit()
 X_train, y_train, X_test, y_test = DataLoader(file_location)
 
+
 def rgb2gray(rgb):
 
     r, g, b = rgb[:, :, :, 0], rgb[:, :, :, 1], rgb[:, :, :, 2]
@@ -44,11 +44,11 @@ def rgb2gray(rgb):
     return gray
 
 
-X_train = rgb2gray(X_train)/255
+X_train = rgb2gray(X_train) / 255
 for i, x in enumerate(X_train):
     X_train[i] = util.invert(x)
 
-X_test = rgb2gray(X_test)/255
+X_test = rgb2gray(X_test) / 255
 for i, x in enumerate(X_test):
     X_test[i] = util.invert(x)
 

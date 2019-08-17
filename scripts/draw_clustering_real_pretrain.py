@@ -1,8 +1,8 @@
-
 import sys
 import os
 import h5py
 import run
+
 sys.path.append("../src")
 
 import numpy as np
@@ -13,6 +13,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 import matplotlib.pyplot as plt
 import matplotlib
+
 matplotlib.use("Agg")
 
 from draw import DRAW
@@ -34,7 +35,7 @@ y_sim = np.load("../data/simulated/test_targets.npy")[0:1000]
 
 oh = OneHotEncoder(sparse=False)
 y_sim = oh.fit_transform(y_sim.reshape(-1, 1))
-tmp = np.zeros(np.array(y_sim.shape) + [0, 1]) 
+tmp = np.zeros(np.array(y_sim.shape) + [0, 1])
 tmp[:, :-1] = y_sim
 y_sim = tmp
 
@@ -60,61 +61,55 @@ array_delta_r.fill(delta_read)
 array_delta_r = array_delta_r.astype(np.float32)
 
 attn_config = {
-            "read_N": read_N,
-            "write_N": write_N,
-            "write_N_sq": write_N**2,
-            "delta_w": array_delta_w,
-            "delta_r": array_delta_r,
-        }
+    "read_N": read_N,
+    "write_N": write_N,
+    "write_N_sq": write_N ** 2,
+    "delta_w": array_delta_w,
+    "delta_r": array_delta_r,
+}
 
 mode_config = {
-        "simulated_mode": False,
-        "restore_mode": False,
-        "include_KL": False,
-        "include_MMD": False,
-        "include_KM": True
-        }
+    "simulated_mode": False,
+    "restore_mode": False,
+    "include_KL": False,
+    "include_MMD": False,
+    "include_KM": True,
+}
 
 clustering_config = {
-        "n_clusters":3,
-        "alpha":1,
-        "delta":0.01,
-        "pretrain_epochs": 200,
-        "update_interval": 140,
-        "pretrain_simulated":True,
-        "X_c": X_sim,
-        "Y_c": y_sim,
-        }
+    "n_clusters": 3,
+    "alpha": 1,
+    "delta": 0.01,
+    "pretrain_epochs": 200,
+    "update_interval": 140,
+    "pretrain_simulated": True,
+    "X_c": X_sim,
+    "Y_c": y_sim,
+}
 
 draw_model = DRAW(
-        T,
-        dec_size,
-        enc_size,
-        latent_dim,
-        X,
-        beta=10,
-        use_attention=True,
-        attn_config=attn_config,
-        mode_config=mode_config,
-        clustering_config=clustering_config,
-        labelled_data=[x_train, y_train] 
-        )
+    T,
+    dec_size,
+    enc_size,
+    latent_dim,
+    X,
+    beta=10,
+    use_attention=True,
+    attn_config=attn_config,
+    mode_config=mode_config,
+    clustering_config=clustering_config,
+    labelled_data=[x_train, y_train],
+)
 
-graph_kwds = {
-        "initializer": tf.initializers.glorot_normal
-        }
+graph_kwds = {"initializer": tf.initializers.glorot_normal}
 
-loss_kwds = {
-        "reconst_loss": None,
-        }
+loss_kwds = {"reconst_loss": None}
 
 draw_model.compile_model(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
-opt_args = [1e-3,]
-opt_kwds = {
-        "beta1": 0.6,
-        }
+opt_args = [1e-3]
+opt_kwds = {"beta1": 0.6}
 
 draw_model.compute_gradients(opt, opt_args, opt_kwds)
 
@@ -127,11 +122,5 @@ with open("run.py", "w") as fo:
     fo.write("run={}".format(run.run + 1))
 
 lx, lz, = draw_model.train(
-        sess,
-        epochs,
-        data_dir,
-        model_dir,
-        batch_size,
-        earlystopping=True,
-        run=run.run
-        )
+    sess, epochs, data_dir, model_dir, batch_size, earlystopping=True, run=run.run
+)

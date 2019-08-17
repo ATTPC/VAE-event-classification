@@ -1,5 +1,5 @@
-
 import sys
+
 sys.path.append("../src")
 from draw import DRAW
 from counter import *
@@ -18,7 +18,6 @@ from sklearn.metrics import f1_score
 from keras.utils import to_categorical
 
 
-
 matplotlib.use("Agg")
 
 print("PID: ", os.getpid())
@@ -27,15 +26,12 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 
 def longform_latent(latent,):
-    longform_samples = np.zeros((
-        latent.shape[1],
-        latent.shape[0]*latent.shape[2]
-    ))
+    longform_samples = np.zeros((latent.shape[1], latent.shape[0] * latent.shape[2]))
 
     latent_dim = latent.shape[2]
 
     for i, evts in enumerate(latent):
-        longform_samples[:, i*latent_dim:(i+1)*latent_dim] = evts
+        longform_samples[:, i * latent_dim : (i + 1) * latent_dim] = evts
 
     return longform_samples
 
@@ -74,8 +70,8 @@ with h5py.File("../data/images.h5", "r") as fo:
     test_targets = np.array(fo["test_targets"])
 
 all_0130 = np.load("../data/processed/all_0130.npy")
-#all_0210 = np.load("../data/processed/all_0210.npy")
-#all_data = np.concatenate([all_0130, all_0210])
+# all_0210 = np.load("../data/processed/all_0210.npy")
+# all_data = np.concatenate([all_0130, all_0210])
 
 all_data = all_0130[0:200]
 
@@ -103,7 +99,7 @@ write_N = N
 attn_config = {
     "read_N": read_N,
     "write_N": write_N,
-    "write_N_sq": write_N**2,
+    "write_N_sq": write_N ** 2,
     "delta_w": delta,
     "delta_r": delta,
 }
@@ -113,7 +109,7 @@ mode_config = {
     "restore_mode": False,
     "include_KL": False,
     "include_MMD": True,
-    "use_vgg": True
+    "use_vgg": True,
 }
 
 model_train_targets = to_categorical(train_targets)
@@ -137,21 +133,16 @@ draw_model = DRAW(
 graph_kwds = {
     "initializer": tf.initializers.glorot_normal,
     "n_encoder_cells": 1,
-    "n_decoder_cells": 1
+    "n_decoder_cells": 1,
 }
 
-loss_kwds = {
-    "reconst_loss": None,
-    "scale_kl": False,
-}
+loss_kwds = {"reconst_loss": None, "scale_kl": False}
 
 draw_model.compile_model(graph_kwds, loss_kwds)
 
 opt = tf.train.AdamOptimizer
-opt_args = [1e-3, ]
-opt_kwds = {
-    "beta1": 0.5,
-}
+opt_args = [1e-3]
+opt_kwds = {"beta1": 0.5}
 
 draw_model.compute_gradients(opt, opt_args, opt_kwds)
 
@@ -161,29 +152,22 @@ data_dir = "../drawing"
 model_dir = "../models"
 
 lx, lz, = draw_model.train(
-    sess,
-    epochs,
-    data_dir,
-    model_dir,
-    batch_size,
-    earlystopping=False)
+    sess, epochs, data_dir, model_dir, batch_size, earlystopping=False
+)
 
 draw_model.X = train_data
 draw_model.generate_latent(sess, "../drawing", (train_data, test_data))
 
 latent_values, _, _ = draw_model.generate_latent(
-    sess,
-    "../drawing",
-    (train_data, test_data),
-    save=False
+    sess, "../drawing", (train_data, test_data), save=False
 )
 
 latent_train = longform_latent(latent_values[0])
 latent_test = longform_latent(latent_values[1])
 
 train_score, test_score = compute_accuracy(
-    latent_train, train_targets,
-    latent_test, test_targets)
+    latent_train, train_targets, latent_test, test_targets
+)
 
 print()
 
@@ -192,7 +176,7 @@ print("train: ", train_score)
 print("test : ", test_score)
 print("---------------------")
 
-#draw_model.generate_samples("../drawing", )
+# draw_model.generate_samples("../drawing", )
 
 sess.close()
 
@@ -205,5 +189,4 @@ axs[1].plot(range(epochs), lz, label=r"$\mathcal{L}_z$")
 [a.legend() for a in axs]
 [a.set_ylim((1000, 200)) for a in axs]
 
-fig.savefig(
-    "../plots/simulated_loss_functions.png")
+fig.savefig("../plots/simulated_loss_functions.png")

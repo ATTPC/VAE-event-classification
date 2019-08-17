@@ -14,8 +14,8 @@ x2 = tf.constant([5, 6, 7, 8])
 result = tf.multiply(x1, x2)
 
 with tf.device("/gpu:2"):
-	session = tf.Session()
+    session = tf.Session()
 
-	np.savetxt("testfile.csv",session.run(result))
+    np.savetxt("testfile.csv", session.run(result))
 
-	session.close()
+    session.close()
