@@ -53,6 +53,7 @@ class ConVae(LatentModel):
         self.pretrain_simulated = False
         self.target_imgs = target_imgs
         self.batchnorm = False
+        
 
         super().__init__(X, latent_dim, beta, mode_config)
         self.use_attention = False
@@ -140,17 +141,21 @@ class ConVae(LatentModel):
                     h1 = a(h1)
                     with tf.name_scope("batch_norm"):
                         if self.batchnorm:
-                            h1 = BatchNormalization(
+                            bn = BatchNormalization(
                                 axis=-1, center=True, scale=True, epsilon=1e-4
-                            )(h1)
+                            )
+                            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                            h1 = bn(h1, training=self.training)
                             self.variable_summary(h1)
                 else:
                     a = activations[activation]
                     with tf.name_scope("batch_norm"):
                         if self.batchnorm:
-                            h1 = BatchNormalization(
+                            bn = BatchNormalization(
                                 axis=-1, center=True, scale=True, epsilon=1e-4
-                            )(h1)
+                            )
+                            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                            h1 = bn(h1, training=self.training)
                             self.variable_summary(h1)
                     h1 = a(h1)
         else:
@@ -181,17 +186,21 @@ class ConVae(LatentModel):
                         h1 = a(h1)
                         with tf.name_scope("batch_norm"):
                             if self.batchnorm:
-                                h1 = BatchNormalization(
+                                bn = BatchNormalization(
                                     axis=-1, center=True, scale=True, epsilon=1e-4
-                                )(h1)
+                                )
+                                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                                h1 = bn(h1, training=self.training)
                                 self.variable_summary(h1)
                     else:
                         a = activations[activation]
                         with tf.name_scope("batch_norm"):
                             if self.batchnorm:
-                                h1 = BatchNormalization(
+                                bn = BatchNormalization(
                                     axis=-1, center=True, scale=True, epsilon=1e-4
-                                )(h1)
+                                )
+                                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                                h1 = bn(h1, training=self.training)
                                 self.variable_summary(h1)
                         h1 = a(h1)
 
@@ -202,17 +211,22 @@ class ConVae(LatentModel):
             h1 = tf.keras.layers.Reshape((shape[1] * shape[2] * shape[3],))(h1)
 
         if self.include_KL:
-            self.mean = Dense(self.latent_dim)(h1)
-            self.var = Dense(self.latent_dim)(h1)
+            self.mean = Dense(self.latent_dim, kernel_regularizer=k_reg)(h1)
+            self.var = Dense(self.latent_dim, kernel_regularizer=k_reg)(h1)
             sample = Lambda(
                 self.sampling,
                 output_shape=(self.latent_dim,),
-                kernel_regularizer=k_reg,
                 name="sampler",
             )([self.mean, self.var])
         else:
             sample = Dense(self.latent_dim, kernel_regularizer=k_reg)(h1)
-
+            if self.batchnorm:
+                bn = BatchNormalization(
+                    axis=-1, center=True, scale=True, epsilon=1e-4
+                )
+                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                sample = bn(sample, training=self.training)
+                self.variable_summary(sample)
         if self.include_KM:
             self.clusters = tf.get_variable(
                 "clusters",
@@ -253,7 +267,11 @@ class ConVae(LatentModel):
         with tf.name_scope("dense"):
             de1 = Dense(full_deconv_shape, kernel_regularizer=k_reg)(sample)
             if self.batchnorm:
-                de1 = BatchNormalization()(de1)
+                bn = BatchNormalization(
+                    axis=-1, center=True, scale=True, epsilon=1e-4
+                )
+                tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                de1 = bn(de1, training=self.training)
             self.variable_summary(de1)
 
         de1 = activations[activation](de1)
@@ -301,28 +319,31 @@ class ConVae(LatentModel):
                     de1 = a(de1)
                     with tf.name_scope("batch_norm"):
                         if self.batchnorm:
-                            de1 = tf.keras.layers.BatchNormalization(
+                            bn = BatchNormalization(
                                 axis=-1, center=True, scale=True, epsilon=1e-4
-                            )(de1)
-                            self.variable_summary(de1)
+                            )
+                            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                            de1 = bn(de1, training=self.training)
                 else:
                     a = activations[activation]
                     with tf.name_scope("batch_norm"):
                         if self.batchnorm:
-                            de1 = tf.keras.layers.BatchNormalization(
+                            bn = BatchNormalization(
                                 axis=-1, center=True, scale=True, epsilon=1e-4
-                            )(de1)
-                            self.variable_summary(de1)
+                            )
+                            tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                            de1 = bn(de1, training=self.training)
                     de1 = a(de1)
 
         # decoder_out = ZeroPadding2D(padding=((1, 0), (1, 0)))(decoder_out)
         with tf.name_scope("final_deconv"):
             with tf.name_scope("batch_norm"):
                 if self.batchnorm:
-                    de1 = tf.keras.layers.BatchNormalization(
+                    bn = BatchNormalization(
                         axis=-1, center=True, scale=True, epsilon=1e-4
-                    )(de1)
-                    self.variable_summary(de1)
+                    )
+                    tf.add_to_collection(tf.GraphKeys.UPDATE_OPS, bn.updates)
+                    de1 = bn(de1, training=self.training)
             if output_activation is None:
                 decoder_out = de1
             else:
@@ -389,18 +410,18 @@ class ConVae(LatentModel):
         elif self.include_MMD:
             z = self.z_seq[0]
             n = self.batch_size
-            mean_0 = -10.0
-            mean_1 = 10.0
+            mean_0 = 0.
+            #mean_1 = 10.0
             norm1 = tf.distributions.Normal(mean_0, 1.0)
-            norm2 = tf.distributions.Normal(mean_1, 1.0)
-            binom = tf.distributions.Multinomial(1.0, probs=[0.5, 0.5])
+            #norm2 = tf.distributions.Normal(mean_1, 1.0)
+            binom = tf.distributions.Multinomial(1.0, probs=[0.5])#, 0.5])
 
             y1 = norm1.sample((n, self.latent_dim))
-            y2 = norm2.sample((n, self.latent_dim))
+            #y2 = norm2.sample((n, self.latent_dim))
             # y3 = norm3.sample((n, self.latent_dim))
 
             w = binom.sample((n, self.latent_dim))
-            ref = w[:, :, 0] * y1 + w[:, :, 1] * y2  # + w[:, :, 2]*y3
+            ref = w[:, :, 0] * y1 #+ w[:, :, 1] * y2  # + w[:, :, 2]*y3
             # ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
             mmd = self.compute_mmd(ref, z)
 
@@ -408,11 +429,11 @@ class ConVae(LatentModel):
             regularize against the trivial solutions where values
             congregate at the mixture mean, mu
             """
-            mu = 0.5 * (mean_0 + mean_1)
-            reg_term = tf.reduce_sum(tf.squared_difference(mu, z), 1)
-            trivial_reg = tf.math.divide(1, reg_term)
-            trivial_reg = 0.5 * tf.reduce_mean(trivial_reg)
-            self.Lz = self.beta * mmd + trivial_reg
+            #mu = 0.5 * (mean_0 + mean_1)
+            #reg_term = tf.reduce_sum(tf.squared_difference(mu, z), 1)
+            #trivial_reg = tf.math.divide(1, reg_term)
+            #trivial_reg = 0.5 * tf.reduce_mean(trivial_reg)
+            self.Lz = self.beta * mmd #+ trivial_reg
         elif self.include_KM:
             self.p = tf.placeholder(tf.float32, (None, self.n_clusters))
             if self.include_MMD:

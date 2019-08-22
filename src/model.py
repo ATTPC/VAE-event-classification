@@ -42,6 +42,7 @@ class LatentModel:
 
         self.X = X
         self.eps = 1e-8
+        self.training = True
 
         self.data_shape = self.X.shape
 
@@ -349,8 +350,10 @@ class LatentModel:
                         i, sess, data_dir, model_dir
                     )
                     if to_break:
+                        self.training = False
                         return all_lx, all_lz
-                    if performance < 0.8:
+                    if performance < 0.0:
+                        self.training = False
                         return all_lx, all_lz
 
             """
@@ -450,6 +453,7 @@ class LatentModel:
                     self.evaluate_cluster(sess, i)
                 if save_checkpoints:
                     self.storeResult(sess, feed_dict, data_dir, model_dir, i)
+        self.training = False
         return all_lx, all_lz
 
     def earlystopping(self, smooth_loss, all_lx, all_lz=None, i=0):
