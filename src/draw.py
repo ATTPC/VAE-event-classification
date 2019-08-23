@@ -219,22 +219,8 @@ class DRAW(LatentModel):
                     axis=-1, center=True, scale=True, epsilon=1e-4
                 )(h_enc)
 
-            if self.include_KL:
-                z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
-            if self.include_KM:
-                with tf.variable_scope("sample"):
-                    z, latent_state = self.latent_cell(h_enc, latent_state)
-                    if t == (self.T - 1):
-                        self.clusters = tf.get_variable(
-                            "clusters",
-                            shape=(self.n_clusters, self.latent_dim),
-                            initializer=tf.initializers.random_uniform(),
-                        )
-                        self.q = self.clustering_layer(z)
-            else:
-                with tf.variable_scope("sample", reuse=self.DO_SHARE):
-                    z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
-                    # z, latent_state = self.latent_cell(h_enc, latent_state)
+            """ Compute latent sample """
+            z  = self.compute_latent_sample(t, h_enc)
 
             """ Decoder operations """
             h_dec, dec_state = self.decode(dec_state, z)
@@ -271,6 +257,7 @@ class DRAW(LatentModel):
                 tmp = self.linear(Z, self.Y_c.shape[1])
 
             self.logits = tf.nn.softmax(tmp)
+
 
     def _ModelLoss(self, reconst_loss=None, scale_kl=False):
         """
@@ -384,6 +371,25 @@ class DRAW(LatentModel):
             self.classifier_cost = tf.reduce_mean(
                 tf.reduce_sum(self.binary_crossentropy(self.y_batch, self.logits))
             )
+
+
+    def compute_latent_sample(self, t, h_enc,):
+        if self.include_KL:
+            z, self.mus[t], self.logsigmas[t], self.sigmas[t] = self.sample(h_enc)
+        if self.include_KM:
+            with tf.variable_scope("sample"):
+                z, latent_state = self.latent_cell(h_enc, latent_state)
+                if t == (self.T - 1):
+                    self.clusters = tf.get_variable(
+                        "clusters",
+                        shape=(self.n_clusters, self.latent_dim),
+                        initializer=tf.initializers.random_uniform(),
+                    )
+                    self.q = self.clustering_layer(z)
+        else:
+            with tf.variable_scope("sample", reuse=self.DO_SHARE):
+                z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
+        return z
 
     def encode(self, state, input):
         with tf.variable_scope("encoder", reuse=self.DO_SHARE):
