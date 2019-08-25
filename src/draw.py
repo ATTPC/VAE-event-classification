@@ -125,10 +125,13 @@ class DRAW(LatentModel):
     def _ModelGraph(
         self,
         initializer=tf.initializers.glorot_normal,
+        kernel_reg_strength=1e-2,
         activation="tanh",
+        output_activation="sigmoid",
         n_encoder_cells=2,
         n_decoder_cells=2,
     ):
+        self.kernel_reg_strength = kernel_reg_strength
         activations = {
             "relu": tf.keras.layers.ReLU(),
             "lrelu": tf.keras.layers.LeakyReLU(),
@@ -153,7 +156,7 @@ class DRAW(LatentModel):
                 tf.nn.rnn_cell.LSTMCell(
                     self.enc_size,
                     state_is_tuple=True,
-                    activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    activity_regularizer=tf.contrib.layers.l2_regularizer(self.kernel_reg_strength),
                     activation=self.activation,
                     initializer=initializer,
                 )
@@ -164,7 +167,7 @@ class DRAW(LatentModel):
                 tf.nn.rnn_cell.LSTMCell(
                     self.dec_size,
                     state_is_tuple=True,
-                    activity_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    activity_regularizer=tf.contrib.layers.l2_regularizer(self.kernel_reg_strength),
                     activation=self.activation,
                     initializer=initializer,
                 )
@@ -229,8 +232,11 @@ class DRAW(LatentModel):
                 h_dec = BatchNormalization(
                     axis=-1, center=True, scale=True, epsilon=1e-4
                 )(h_dec)
-
-            self.canvas_seq[t] = c_prev + self.write(h_dec)
+            if output_activation is None:
+                self.canvas_seq[t] = c_prev + self.write(h_dec)
+            else:
+                out_act = activations[output_activation]
+                self.canvas_seq[t] = out_act(c_prev + self.write(h_dec))
 
             """Summarise variables """
             vars_ = [z, h_enc, h_dec]
@@ -272,7 +278,7 @@ class DRAW(LatentModel):
         """
 
         if reconst_loss is None:
-            x_recons = tf.sigmoid(self.canvas_seq[-1])
+            x_recons = self.canvas_seq[-1]
             reconst_loss = self.binary_crossentropy
             self.Lx = tf.reduce_mean(tf.reduce_sum(reconst_loss(self.x, x_recons), 1))
         if reconst_loss == "mse":
@@ -294,8 +300,7 @@ class DRAW(LatentModel):
                 logsigma_sq = tf.square(self.logsigmas[t])
                 KL_loss[t] = tf.reduce_sum(mu_sq + sigma_sq - 2 * logsigma_sq, 1)
 
-            KL = self.beta * 0.5 * tf.add_n(KL_loss) - self.T / 2
-
+            KL = self.beta * (0.5 * tf.add_n(KL_loss) - self.T / 2)
             if scale_kl:
                 self.kl_scale = tf.placeholder(dtype=tf.float32, shape=(1,))
                 self.Lz = tf.reduce_mean(KL)
@@ -322,9 +327,9 @@ class DRAW(LatentModel):
                 )
         elif self.include_MMD:
             n = self.batch_size
-            norm1 = tf.distributions.Normal(0.0, 1.0)
-            norm2 = tf.distributions.Normal(6.0, 1.0)
-            binom = tf.distributions.Multinomial(1.0, probs=[0.5, 0.5])
+            #norm1 = tf.distributions.Normal(0.0, 1.0)
+            #norm2 = tf.distributions.Normal(6.0, 1.0)
+            #binom = tf.distributions.Multinomial(1.0, probs=[0.5, 0.5])
             self.Lz = 0
 
             """
@@ -344,16 +349,15 @@ class DRAW(LatentModel):
             """
             for t in range(self.T):
                 z = self.z_seq[t]
-                n = self.batch_size
-                y1 = norm1.sample((n, self.latent_dim))
-                y2 = norm2.sample((n, self.latent_dim))
+                #y1 = norm1.sample((n, self.latent_dim))
+                #y2 = norm2.sample((n, self.latent_dim))
                 # y3 = norm3.sample((n, self.latent_dim))
-                w = binom.sample((n, self.latent_dim))
-                ref = w[:, :, 0] * y1 + w[:, :, 1] * y2  # + w[:, :, 2]*y3
-                # ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+                #w = binom.sample((n, self.latent_dim))
+                #ref = w[:, :, 0] * y1 + w[:, :, 1] * y2  # + w[:, :, 2]*y3
+                ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
                 mmd = self.compute_mmd(ref, z)
                 self.Lz += mmd
-                self.Lz += tf.losses.mean_squared_error(tf.reduce_mean(z), 3)
+                #self.Lz += tf.losses.mean_squared_error(tf.reduce_mean(z), 3)
             self.Lz = self.beta * self.Lz  # - self.T/2
 
         else:
@@ -388,7 +392,11 @@ class DRAW(LatentModel):
                     self.q = self.clustering_layer(z)
         else:
             with tf.variable_scope("sample", reuse=self.DO_SHARE):
-                z = self.linear(h_enc, self.latent_dim, lmbd=0.001)
+                z = self.linear(
+                        h_enc,
+                        self.latent_dim,
+                        lmbd=self.kernel_reg_strength
+                        )
         return z
 
     def encode(self, state, input):
@@ -412,13 +420,17 @@ class DRAW(LatentModel):
 
         e = tf.random_normal((self.batch_size, self.latent_dim), mean=0, stddev=1)
         with tf.variable_scope("mu", reuse=self.DO_SHARE):
-            mu = self.linear(h_enc, self.latent_dim, lmbd=0.1)
+            mu = self.linear(
+                    h_enc,
+                    self.latent_dim,
+                    lmbd=self.kernel_reg_strength
+                    )
 
         with tf.variable_scope("sigma", reuse=self.DO_SHARE):
             sigma = self.linear(
                 h_enc,
                 self.latent_dim,
-                lmbd=0.1,
+                lmbd=self.kernel_reg_strength,
                 regularizer=tf.contrib.layers.l2_regularizer,
             )
             sigma = tf.nn.relu(sigma)
@@ -437,7 +449,7 @@ class DRAW(LatentModel):
 
     def read_conv(self, x, x_hat, h_dec_prev):
         with tf.variable_scope("gamma", reuse=self.DO_SHARE):
-            gamma = self.linear(h_dec_prev, 1)
+            gamma = self.linear(h_dec_prev, 1, lmbd=self.kernel_reg_strength)
             self.variable_summary(gamma)
         x = gamma * x
         x = tf.reshape(x, (tf.shape(x)[0], self.H, self.W, 1))
@@ -456,7 +468,7 @@ class DRAW(LatentModel):
 
                 out = tf.reshape(out, (tf.shape(x)[0], flat_shape))
                 with tf.variable_scope("out", reuse=self.DO_SHARE):
-                    out = self.linear(out, 100)
+                    out = self.linear(out, 100, lmbd=self.kernel_reg_strength)
                 return out
 
         else:
@@ -480,8 +492,8 @@ class DRAW(LatentModel):
                         padding=padding,
                         use_bias=True,
                         name="conv_{}".format(i),
-                        # kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                        # bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                        # kernel_regularizer=tf.contrib.layers.l2_regularizer(self.kernel_reg_strength),
+                        # bias_regularizer=tf.contrib.layers.l2_regularizer(self.kernel_reg_strength),
                     )(out)
 
                     if pool:
@@ -528,7 +540,7 @@ class DRAW(LatentModel):
 
         out_size = 0
         with tf.variable_scope("write", reuse=self.DO_SHARE):
-            out = self.linear(h_dec, self.flat_shape)
+            out = self.linear(h_dec, self.flat_shape, lmbd=self.kernel_reg_strength)
             start_shape = (self.out_shape[1], self.out_shape[2], self.out_shape[3])
             out = tf.keras.layers.Reshape(start_shape)(out)
             pow_2 = self.H % 2 ** self.conv_architecture["n_layers"] != 0
@@ -558,8 +570,8 @@ class DRAW(LatentModel):
                     padding=padding,
                     use_bias=True,
                     name="convT_{}".format(i),
-                    # kernel_regularizer=tf.contrib.layers.l2_regularizer(0.01),
-                    # bias_regularizer=tf.contrib.layers.l2_regularizer(0.01),
+                    # kernel_regularizer=tf.contrib.layers.l2_regularizer(self.kernel_reg_strength),
+                    # bias_regularizer=tf.contrib.layers.l2_regularizer(self.kernel_reg_strength),
                 )(out)
 
                 if pool:
@@ -587,7 +599,12 @@ class DRAW(LatentModel):
 
     def attn_params(self, scope, h_dec, N):
         with tf.variable_scope(scope, reuse=self.DO_SHARE):
-            tmp = self.linear(h_dec, 4, regularizer=tf.contrib.layers.l1_regularizer)
+            tmp = self.linear(
+                    h_dec,
+                    4,
+                    regularizer=tf.contrib.layers.l2_regularizer,
+                    lmbd=self.kernel_reg_strength
+                    )
             gx, gy, logsigma_sq, loggamma = tf.split(tmp, 4, 1)
 
         sigma_sq = tf.exp(logsigma_sq)
@@ -628,8 +645,8 @@ class DRAW(LatentModel):
         Fx = tf.exp(-tf.square(A - MU_X) / (2 * sigma_sq))
         Fy = tf.exp(-tf.square(B - MU_Y) / (2 * sigma_sq))
 
-        Fx = Fx / tf.maximum(tf.reduce_sum(Fx, 1, keepdims=True), self.eps)
-        Fy = Fy / tf.maximum(tf.reduce_sum(Fy, 1, keepdims=True), self.eps)
+        Fx = Fx / tf.maximum(tf.reduce_sum(Fx, 2, keepdims=True), self.eps)
+        Fy = Fy / tf.maximum(tf.reduce_sum(Fy, 2, keepdims=True), self.eps)
 
         return Fx, Fy
 
@@ -648,7 +665,10 @@ class DRAW(LatentModel):
 
         with tf.variable_scope("writeW", reuse=self.DO_SHARE):
             w = self.linear(
-                h_dec, self.write_N_sq, tf.contrib.layers.l1_regularizer, lmbd=1e-5
+                h_dec,
+                self.write_N_sq,
+                tf.contrib.layers.l2_regularizer,
+                lmbd=self.kernel_reg_strength,
             )
 
         w = tf.reshape(w, [-1, self.write_N, self.write_N])
