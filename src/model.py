@@ -32,19 +32,13 @@ class LatentModel:
     those used by sequential models like DRAW
     """
 
-    def __init__(self, X, latent_dim, beta, mode_config):
-
-        tf.reset_default_graph()
+    def __init__(self, data_shape, latent_dim, beta, mode_config):
         signal.signal(signal.SIGINT, self.signal_handler)
-
         self.beta = beta
         self.latent_dim = latent_dim
-
-        self.X = X
         self.eps = 1e-8
         self.training = True
-
-        self.data_shape = self.X.shape
+        self.data_shape = data_shape
 
         if len(self.data_shape) == 3 or len(self.data_shape) == 4:
             self.H = self.data_shape[1]
@@ -496,7 +490,7 @@ class LatentModel:
             if mean_change > 0:
                 print("Earlystopping: overfitting")
                 retval = 1
-            if rel_change < 0.001 * smooth_loss[self.patient_i - 1]:
+            if rel_change < 0.0001 * smooth_loss[self.patient_i - 1]:
                 print("Earlystopping: converged")
                 retval = 1
         return retval, smooth_loss

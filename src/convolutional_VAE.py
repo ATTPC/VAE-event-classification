@@ -32,7 +32,7 @@ class ConVae(LatentModel):
         strides_architecture,
         pooling_architecture,
         latent_dim,
-        X,
+        input_dim,
         beta=1,
         mode_config=None,
         clustering_config=None,
@@ -41,9 +41,7 @@ class ConVae(LatentModel):
         target_imgs=None,
         train_classifier=False,
     ):
-
-        tf.reset_default_graph()
-
+        super().__init__(input_dim, latent_dim, beta, mode_config)
         self.simulated_mode = False
         self.restore_mode = False
         self.include_KL = False
@@ -53,28 +51,22 @@ class ConVae(LatentModel):
         self.pretrain_simulated = False
         self.target_imgs = target_imgs
         self.batchnorm = False
-        
-
-        super().__init__(X, latent_dim, beta, mode_config)
         self.use_attention = False
         self.T = 1
         self.labelled_data = labelled_data
         self.n_layers = n_layers
-
         self.filter_arcitecture = filter_arcitecture
         self.kernel_architecture = kernel_architecture
         self.strides_architecture = strides_architecture
         self.pooling_architecture = pooling_architecture
-
+        self.latent_dim = latent_dim
+        self.sampling_dim = sampling_dim
+        self.train_classifier = train_classifier
         if self.include_KM and clustering_config is None:
             raise RuntimeError("when KM is true a config must be supplied")
         elif self.include_KM and clustering_config is not None:
             for key, val in clustering_config.items():
                 setattr(self, key, val)
-
-        self.latent_dim = latent_dim
-        self.sampling_dim = sampling_dim
-        self.train_classifier = train_classifier
 
     def _ModelGraph(
         self,
@@ -84,6 +76,7 @@ class ConVae(LatentModel):
         bias_reg_strenght=0.00,
         activation="relu",
         output_activation="sigmoid",
+        input_tensor=None,
     ):
         """
         Parameters
@@ -107,8 +100,11 @@ class ConVae(LatentModel):
             "tanh": Lambda(tf.keras.activations.tanh),
             "sigmoid": Lambda(tf.keras.activations.sigmoid),
         }
-
-        self.x = tf.keras.layers.Input(shape=(self.n_input,))
+        
+        if input_tensor is None:
+            self.x = tf.keras.layers.Input(shape=(self.n_input,))
+        else: 
+            self.x = input_tensor
         # self.x = tf.placeholder(tf.float32, shape=(None, self.n_input))
         self.batch_size = tf.shape(self.x)[0]
         self.x_img = tf.keras.layers.Reshape((self.H, self.W, self.ch))(self.x)
@@ -410,19 +406,21 @@ class ConVae(LatentModel):
         elif self.include_MMD:
             z = self.z_seq[0]
             n = self.batch_size
-            mean_0 = 0.
-            #mean_1 = 10.0
+            """
+            mean_0 = -2.
+            mean_1 = 2.0
             norm1 = tf.distributions.Normal(mean_0, 1.0)
-            #norm2 = tf.distributions.Normal(mean_1, 1.0)
-            binom = tf.distributions.Multinomial(1.0, probs=[0.5])#, 0.5])
+            norm2 = tf.distributions.Normal(mean_1, 1.0)
+            binom = tf.distributions.Multinomial(1.0, probs=[0.5, 0.5])
 
             y1 = norm1.sample((n, self.latent_dim))
-            #y2 = norm2.sample((n, self.latent_dim))
+            y2 = norm2.sample((n, self.latent_dim))
             # y3 = norm3.sample((n, self.latent_dim))
 
             w = binom.sample((n, self.latent_dim))
-            ref = w[:, :, 0] * y1 #+ w[:, :, 1] * y2  # + w[:, :, 2]*y3
-            # ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+            """
+            #ref = w[:, :, 0] * y1 + w[:, :, 1] * y2  # + w[:, :, 2]*y3
+            ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
             mmd = self.compute_mmd(ref, z)
 
             """

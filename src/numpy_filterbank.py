@@ -1,6 +1,6 @@
 import numpy as np
 
-eps = 1e-8
+eps = 1e-15
 
 
 class filterbank:
@@ -41,9 +41,10 @@ class filterbank:
 
         Fx = np.exp(-np.square(A - MU_X) / (2 * sigma_sq))
         Fy = np.exp(-np.square(B - MU_Y) / (2 * sigma_sq))
+        print(Fx.shape)
 
-        Fx = Fx / np.maximum(np.sum(Fx, 1, keepdims=True), eps)
-        Fy = Fy / np.maximum(np.sum(Fy, 1, keepdims=True), eps)
+        Fx = Fx / np.maximum(np.sum(Fx, 2, keepdims=True), eps)
+        Fy = Fy / np.maximum(np.sum(Fy, 2, keepdims=True), eps)
 
         return Fx, Fy
 
