@@ -356,7 +356,7 @@ class ConVae(LatentModel):
         if self.use_dd:
             output_list.append(self.dd_reconst)
         self.cae = Model(inputs=self.x, outputs=list(output_list))
-        print(self.cae.summary())
+        #print(self.cae.summary())
         if self.include_KM:
             output_list.append(self.q)
             self.dcec = Model(inputs=self.x, outputs=output_list)
