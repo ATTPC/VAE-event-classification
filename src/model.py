@@ -239,6 +239,8 @@ class LatentModel:
 
     def train(
         self,
+        inputs,
+        outputs,
         sess,
         epochs,
         minibatch_size,
@@ -287,6 +289,9 @@ class LatentModel:
                 data_dir = "../drawing"
             if model_dir is None:
                 model_dir = "../models"
+        
+        self.input_data = inputs
+        self.output_data = outputs
 
         K.set_session(sess)
         # tf.keras.set_session(sess)
@@ -355,7 +360,7 @@ class LatentModel:
             """
 
             for j, ind in enumerate(bm_inst):
-                batch = self.X[ind]
+                batch = self.output_data[0][ind]
                 batch = batch.reshape(np.size(ind), self.n_input)
                 # self.batch_size: minibatch_size}
                 feed_dict = {self.x: batch}

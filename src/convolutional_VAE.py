@@ -41,7 +41,6 @@ class ConVae(LatentModel):
         target_imgs=None,
         train_classifier=False,
     ):
-        super().__init__(input_dim, latent_dim, beta, mode_config)
         self.simulated_mode = False
         self.restore_mode = False
         self.include_KL = False
@@ -49,6 +48,8 @@ class ConVae(LatentModel):
         self.include_KM = False
         self.use_vgg = False
         self.pretrain_simulated = False
+
+        super().__init__(input_dim, latent_dim, beta, mode_config)
         self.target_imgs = target_imgs
         self.batchnorm = False
         self.use_attention = False
@@ -77,6 +78,7 @@ class ConVae(LatentModel):
         activation="relu",
         output_activation="sigmoid",
         input_tensor=None,
+        mixae_n="",
     ):
         """
         Parameters
@@ -212,7 +214,7 @@ class ConVae(LatentModel):
             sample = Lambda(
                 self.sampling,
                 output_shape=(self.latent_dim,),
-                name="sampler",
+                name="sampler"+mixae_n,
             )([self.mean, self.var])
         else:
             sample = Dense(self.latent_dim, kernel_regularizer=k_reg)(h1)
@@ -406,7 +408,7 @@ class ConVae(LatentModel):
         elif self.include_MMD:
             z = self.z_seq[0]
             n = self.batch_size
-            """
+            print("computing mmd")
             mean_0 = -2.
             mean_1 = 2.0
             norm1 = tf.distributions.Normal(mean_0, 1.0)
@@ -418,9 +420,8 @@ class ConVae(LatentModel):
             # y3 = norm3.sample((n, self.latent_dim))
 
             w = binom.sample((n, self.latent_dim))
-            """
-            #ref = w[:, :, 0] * y1 + w[:, :, 1] * y2  # + w[:, :, 2]*y3
-            ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
+            ref = w[:, :, 0] * y1 + w[:, :, 1] * y2  # + w[:, :, 2]*y3
+            #ref = tf.random.normal(tf.stack([self.batch_size, self.latent_dim]))
             mmd = self.compute_mmd(ref, z)
 
             """
