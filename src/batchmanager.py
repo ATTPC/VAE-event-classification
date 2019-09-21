@@ -2,7 +2,7 @@ import numpy as np
 
 
 class BatchManager:
-    def __init__(self, nSamples, batch_size):
+    def __init__(self, nSamples, batch_size, shuffle=True):
         self.available = np.arange(0, nSamples)
         self.batch_size = batch_size
         self.remainder = nSamples % self.batch_size
@@ -10,9 +10,13 @@ class BatchManager:
         # self.batch_multip = self.n*self.batch_size
         self.i = 0
         self.stopiter = False
-        self.indices = np.random.choice(
-            self.available, size=(self.n, self.batch_size), replace=False
-        )
+        if shuffle:
+            self.indices = np.random.choice(
+                self.available, size=(self.n, self.batch_size), replace=False
+            )
+        else:
+            ordinary = np.arange(0, batch_size * self.n)
+            self.indices = ordinary.reshape((self.n, self.batch_size))
 
     def __next__(self,):
 

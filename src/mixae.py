@@ -21,7 +21,6 @@ class entropy_callback(tf.keras.callbacks.Callback):
         c3 = logs["batch_ent_loss"]
         return c1, c2, c3
 
-
 class probabilities_log(tf.keras.callbacks.Callback):
     def __init__(self, model, nclasses, data):
         self.prob_log = []
@@ -29,7 +28,7 @@ class probabilities_log(tf.keras.callbacks.Callback):
         self.nclasses = nclasses
 
     def on_epoch_end(self, epoch, logs={}):
-        bm = BatchManager(self.data.shape[0], 100)
+        bm = BatchManager(self.data.shape[0], 100, shuffle=False)
         prob_all = np.zeros((self.data.shape[0], self.nclasses))
         for batch in bm:
             probs = self.model.predict_on_batch(self.data[batch])
@@ -38,11 +37,13 @@ class probabilities_log(tf.keras.callbacks.Callback):
 
 
 class mixae_model:
-    def __init__(self, ae_args, alpha=0.1, beta=10):
+    def __init__(self, ae_args, alpha=0.1, beta=10, rec=10, vae_beta=10):
         self.ae_args = ae_args
         self.input_tensor = None
         self.alpha = tf.keras.backend.variable(alpha, dtype=tf.float32)
         self.beta = tf.keras.backend.variable(beta, dtype=tf.float32)
+        self.rec = tf.keras.backend.variable(rec, dtype=tf.float32)
+        self.vae_beta = tf.keras.backend.variable(vae_beta, dtype=tf.float32)
         self.epsilon = tf.keras.backend.constant(1e-8, dtype=tf.float32)
         self.training = True
 
@@ -104,7 +105,9 @@ class mixae_model:
             std_stack = tf.keras.layers.Lambda(tf.stack, name="std_sq")
             means = mean_stack([ae.mean for ae in autoencoders])
             std_sqs = std_stack([ae.var for ae in autoencoders])
-            to_train_model.add_loss(self.kl_div_loss(means, std_sqs))
+            to_train_model.add_loss(
+                    self.vae_beta*self.kl_div_loss(means, std_sqs)
+                    )
 
         to_train_model.compile(
             opt(**opt_args),
@@ -163,8 +166,6 @@ class mixae_model:
         if self.input_tensor is None:
             self.input_tensor = tf.keras.layers.Input(shape=(ae.n_input,))
             self.ninput = ae.n_input
-            self.rec = tf.keras.backend.variable(
-                self.ninput/1, dtype=tf.float32)
             self.latent_dim = positional[-2]
             self.pixel_weight = tf.keras.backend.constant(
                 1/self.ninput, dtype=tf.float32)

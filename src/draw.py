@@ -76,10 +76,6 @@ class DRAW(LatentModel):
         self.T = T
         self.dec_size = dec_size
         self.enc_size = enc_size
-
-        # set batch size as placeholder to be fed with each run
-
-        self.X = X
         self.eps = 1e-8
 
         self.train_classifier = train_classifier
@@ -232,11 +228,14 @@ class DRAW(LatentModel):
                 h_dec = BatchNormalization(
                     axis=-1, center=True, scale=True, epsilon=1e-4
                 )(h_dec)
-            if output_activation is None:
+            if t < (self.T-1):
                 self.canvas_seq[t] = c_prev + self.write(h_dec)
             else:
-                out_act = activations[output_activation]
-                self.canvas_seq[t] = out_act(c_prev + self.write(h_dec))
+                if output_activation is None:
+                    self.canvas_seq[t] = c_prev + self.write(h_dec)
+                else:
+                    out_act = activations[output_activation]
+                    self.canvas_seq[t] = out_act(c_prev + self.write(h_dec))
 
             """Summarise variables """
             vars_ = [z, h_enc, h_dec]
@@ -251,7 +250,6 @@ class DRAW(LatentModel):
             self.dec_state_seq[t] = dec_state
             h_dec_prev = h_dec
             c_prev = self.canvas_seq[t]
-
             self.DO_SHARE = True
 
         if self.train_classifier:
@@ -608,13 +606,13 @@ class DRAW(LatentModel):
             gx, gy, logsigma_sq, loggamma = tf.split(tmp, 4, 1)
 
         sigma_sq = tf.exp(logsigma_sq)
+        gamma = tf.exp(loggamma)
 
         if scope == "write":
             delta = self.delta_w  # tf.exp(logdelta)
         else:
             delta = self.delta_r
 
-        gamma = tf.exp(loggamma)
 
         gx = (self.H + 1) / 2 * (gx + 1)
         gy = (self.W + 1) / 2 * (gy + 1)

@@ -33,13 +33,16 @@ class LatentModel:
     """
 
     def __init__(self, data_shape, latent_dim, beta, mode_config):
+
+        #tf.reset_default_graph()
         signal.signal(signal.SIGINT, self.signal_handler)
+
         self.beta = beta
         self.latent_dim = latent_dim
+        
+        self.data_shape = data_shape
         self.eps = 1e-8
         self.training = True
-        self.data_shape = data_shape
-
         if len(self.data_shape) == 3 or len(self.data_shape) == 4:
             self.H = self.data_shape[1]
             self.W = self.data_shape[2]
@@ -192,7 +195,7 @@ class LatentModel:
             if to_earlystop:
                 return
 
-    def run_large(self, sess, to_run, data, input_tensor=None, batch_size=100):
+    def run_large(self, sess, to_run, data, input_tensor=None, batch_size=100, shuffle=True):
         """
         A method to run a large set of samples through the graph with a given set of fetches.
 
@@ -222,7 +225,7 @@ class LatentModel:
             a_shp[0] = n_to_run
             ret_array = np.zeros(a_shp)
 
-        bm = BatchManager(data.shape[0], batch_size)
+        bm = BatchManager(data.shape[0], batch_size, shuffle=shuffle)
 
         for bi in bm:
             n_bi = bi.shape[0]
@@ -239,8 +242,7 @@ class LatentModel:
 
     def train(
         self,
-        inputs,
-        outputs,
+        X,
         sess,
         epochs,
         minibatch_size,
@@ -289,10 +291,8 @@ class LatentModel:
                 data_dir = "../drawing"
             if model_dir is None:
                 model_dir = "../models"
-        
-        self.input_data = inputs
-        self.output_data = outputs
 
+        self.X = X
         K.set_session(sess)
         # tf.keras.set_session(sess)
         self.performance = tf.placeholder(tf.float32, shape=(), name="score")
@@ -360,7 +360,7 @@ class LatentModel:
             """
 
             for j, ind in enumerate(bm_inst):
-                batch = self.output_data[0][ind]
+                batch = self.X[ind]
                 batch = batch.reshape(np.size(ind), self.n_input)
                 # self.batch_size: minibatch_size}
                 feed_dict = {self.x: batch}
@@ -369,7 +369,10 @@ class LatentModel:
                 if self.include_KM:
                     feed_dict[self.p] = self.P[ind]
                 if self.use_vgg:
-                    feed_dict[self.target] = self.target_imgs[ind]
+                    try:
+                        feed_dict[self.target] = self.target_imgs[ind]
+                    except AttributeError:
+                        pass
                 if self.use_dd:
                     feed_dict[self.dd_target] = self.dd_targets[ind]
 
@@ -495,7 +498,7 @@ class LatentModel:
             if mean_change > 0:
                 print("Earlystopping: overfitting")
                 retval = 1
-            if rel_change < 0.0001 * smooth_loss[self.patient_i - 1]:
+            if rel_change < 0.01 * smooth_loss[self.patient_i - 1]:
                 print("Earlystopping: converged")
                 retval = 1
         return retval, smooth_loss
@@ -638,7 +641,7 @@ class LatentModel:
             plt.close(g.fig)
 
         if z.shape[1] == 2:
-            fig, ax = plt.subplts(figsize=(10, 10))
+            fig, ax = plt.subplots(figsize=(10, 10))
             ax.scatter(z)
             plt.savefig("../plots/z_scatter.png")
             plt.close(fig)
@@ -663,7 +666,7 @@ class LatentModel:
             if targets.shape[1] > 1:
                 targets = targets.argmax(-1)
                 targets = np.ravel(targets)
-        q_label = self.run_large(sess, self.q, x_label)
+        q_label = self.run_large(sess, self.q, x_label, shuffle=False)
         y_pred = np.squeeze(q_label.argmax(1))
         return y_pred, targets
 
@@ -695,16 +698,15 @@ class LatentModel:
         else:
             print("Training K-means..... ")
             km = KMeans(n_clusters=self.n_clusters, n_init=20, max_iter=1000, n_jobs=10)
+            #km = MiniBatchKMeans()
 
             print("Compute z")
-            z = self.run_large(sess, self.z_seq[0], self.X)
+            z = self.run_large(sess, self.z_seq[0], self.X, shuffle=False)
             print("Fit k-means")
             km.fit(z)
             print("assign clusters")
             cluster_centers = km.cluster_centers_
-
         # sort cluster centers wrt. to sim results
-
         self.clusters.load(cluster_centers, sess)
 
     def train_simulated(self, sess, epochs, minibatch_size):
@@ -856,7 +858,7 @@ class LatentModel:
                 loss_weights.append(self.beta * self.lmbd)
             print(loss)
             self.cae.compile(
-                optimizer=optimizer, loss=list(loss), loss_weights=[1, self.lmbd]
+                optimizer=optimizer, loss=list(loss), loss_weights=loss_weights
             )
             self.dcec.compile(
                 optimizer="adam",
@@ -988,7 +990,10 @@ class LatentModel:
         canvasses = sess.run(self.canvas_seq, feed_dict)
         canvasses = np.array(canvasses)
         if self.use_vgg:
-            references = np.array(feed_dict[self.target])
+            try:
+                references = np.array(feed_dict[self.target])
+            except AttributeError:
+                references = np.array(feed_dict[self.x])
         else:
             references = np.array(feed_dict[self.x])
         epoch = "_epoch" + str(i)

@@ -259,7 +259,7 @@ class ConVae(LatentModel):
                 div = 1
             deconv_shape /= div
         deconv_shape = int(deconv_shape)
-        print("DECONV SHAPE", deconv_shape)
+        #print("DECONV SHAPE", deconv_shape)
         full_deconv_shape = deconv_shape ** 2 * self.filter_arcitecture[-1]
 
         with tf.name_scope("dense"):
@@ -346,7 +346,7 @@ class ConVae(LatentModel):
                 decoder_out = de1
             else:
                 decoder_out = activations[output_activation](de1)
-        # print("FINAL O", decoder_out.get_shape())
+        print("FINAL O", decoder_out.get_shape())
         if self.use_vgg:
             decoder_out = tf.keras.layers.Reshape((self.target_imgs.shape[1],))(
                 decoder_out

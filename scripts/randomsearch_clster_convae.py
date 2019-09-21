@@ -11,12 +11,12 @@ from randomsearch import RandomSearch
 import data_loader as dl
 from randomsearch_run import run
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 size = "128"
 data = "simulated"
 method = "clster"
-architecture = "ours"
-use_dd = True
+architecture = "static"
+use_dd = False
 reconst = "net_charge"
 
 if "vgg" in data:
@@ -78,6 +78,6 @@ else:
         clustering=True,
         architecture=architecture,
         use_dd=use_dd,
-        dd_targets=dd_train,
+        #dd_targets=dd_train,
     )
 rs.search(n, 150, savedir)

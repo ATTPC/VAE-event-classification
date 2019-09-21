@@ -39,7 +39,7 @@ class ConVaeGenerator(ModelGenerator):
         if self.use_vgg_repr:
             self.dense_layers = [1, 2, 3]
         self.ld = [3, 10, 20, 50, 100, 150, 200]
-        self.cl_ld = [2, 3, 5, 7, 9, 10, 20, 50, 100, 200]
+        self.cl_ld = [3, 5, 9, 11, 15, 20, 50, 100, 200]
         self.reg_strengths = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1, 10]
         # self.sd = [10, 50, 150]
         self.X = X
@@ -78,7 +78,7 @@ class ConVaeGenerator(ModelGenerator):
             strides_architecture,
             pooling_config,
             latent_dim,
-            self.X,
+            self.X.shape,
             beta=beta,
             # sampling_dim=sampling_dim,
             mode_config=mode_config,
@@ -113,6 +113,7 @@ class ConVaeGenerator(ModelGenerator):
         loss_kwds = {"reconst_loss": loss}
         config.append(loss)
         config.append(activation)
+        tf.reset_default_graph()
         model.compile_model(graph_kwds=graph_kwds, loss_kwds=loss_kwds)
         model.compute_gradients(opt, opt_args, opt_kwds)
         return model, config

@@ -157,7 +157,7 @@ for i in range(len(data_loaders)):
     lx, lz = cvae.train(
         sess, epochs, batch_size, earlystopping=True, save_checkpoints=0, verbose=1
     )
-    x_set.append(cvae.run_large(sess, cvae.z_seq[0], x_test))
+    x_set.append(cvae.run_large(sess, cvae.z_seq[0], x_test, shuffle=False))
     sess.close()
     print()
     print(x_set[-1].shape)
