@@ -1,15 +1,8 @@
 #!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score, confusion_matrix, accuracy_score
-from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
-import os
+from sklearn.metrics import silhouette_score, calinski_harabaz_score, davies_bouldin_score
 from sklearn.utils.fixes import comb
 from sklearn.metrics.cluster import contingency_matrix
-from sklearn.metrics import adjusted_rand_score, confusion_matrix
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -18,11 +11,13 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import tensorflow as tf
+import json
+import os
+import sys
+sys.path.append("../src/")
 import data_loader as dl
 from batchmanager import BatchManager
 from mixae import mixae_model, entropy_callback, probabilities_log
-import sys
-sys.path.append("../src/")
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
@@ -106,7 +101,17 @@ def display_events(model, n, n_display=3, what_class=0,):
     plt.close()
 
 
-# In[3]:
+def update_wrapper(self, func):
+    def func_wrapper(epoch, logs={}):
+        # print()
+        # print("old min delta", self.min_delta)
+        self.min_delta *= (0.96*2/3)**epoch
+        # print("New min_delta", self.min_delta)
+        return func(epoch, logs)
+    return func_wrapper
+
+
+testmode = True
 data = "mnist"
 
 if data == "mnist":
@@ -136,11 +141,16 @@ else:
         x_full, y_full, shuffle=True)
     n_samples = x_full.shape[0]
 
+if testmode:
+    x_full = x_full[:950]
+    y_full = y_full[:950]
+    n_samples = 950
+
 n_classes = len(np.unique(y_lab))
 img_shape = x_full.shape[1:] if len(x_full.shape) == 3 else x_full.shape[1:-1]
 
 n_layers = 4
-latent_dim = 8
+latent_dim = 20
 kernel_architecture = [3, 3, 3, 3]
 filter_architecture = [64, 32, 16, 8, ]
 strides_architecture = [2, ]*n_layers
@@ -183,7 +193,6 @@ ae_args = [
 
 x_full_flat = x_full.reshape(n_samples, -1)
 x_lab_flat = x_labeled.reshape(x_labeled.shape[0], -1)
-print(x_full_flat.max(), x_full_flat.min())
 
 earlystopping = tf.keras.callbacks.EarlyStopping(
     "batch_ent_loss",
@@ -194,17 +203,6 @@ earlystopping = tf.keras.callbacks.EarlyStopping(
 )
 earlystopping_pre = tf.keras.callbacks.EarlyStopping(
     "val_loss", min_delta=1e-4, patience=2)
-
-
-def update_wrapper(self, func):
-    def func_wrapper(epoch, logs={}):
-        # print()
-        # print("old min delta", self.min_delta)
-        self.min_delta *= (0.96*2/3)**epoch
-        # print("New min_delta", self.min_delta)
-        return func(epoch, logs)
-    return func_wrapper
-
 
 earlystopping.update_wrapper = update_wrapper
 earlystopping.on_epoch_end = earlystopping.update_wrapper(
@@ -218,7 +216,19 @@ tf.keras.backend.set_session(sess)
 prob_logs = []
 histories = []
 models = []
-runs = 100
+non_gd_measures = [
+    silhouette_score,
+    calinski_harabaz_score,
+    davies_bouldin_score,
+        ]
+non_gd_names = [f.__name__ for f in non_gd_measures]
+fn = "../results/mixae/"+data+"/randomsearch_unsuper_param.txt"
+file_exists = os.path.exists(fn)
+if not file_exists:
+    with open(fn, "w+") as fo:
+        fo.write("[\n")
+
+runs = 2 if testmode else 100
 repeats = 5
 single = False
 alphas = [0.1,  1, ]
@@ -235,9 +245,9 @@ for i in range(runs):
         tf.keras.backend.clear_session()
         mix_obj = mixae_model(
             ae_args, alpha, beta, x_full_flat.shape[0]/theta)
-        m, mp, clst, _ = mix_obj.compile(n_classes)
-        pl = probabilities_log(clst, n_classes, x_lab_flat)
-        n_eps = 10
+        m, mp, clst, full = mix_obj.compile(n_classes)
+        pl = probabilities_log(full, n_classes, latent_dim*n_classes, x_lab_flat)
+        n_eps = 2 if testmode else 20
         unsuper_hist = m.fit(
             x_full_flat,
             [
@@ -260,29 +270,31 @@ for i in range(runs):
                     display_events(m, i, what_class=j)
                 except ValueError:
                     pass
-        models.append(m)
         prob_logs.append(pl)
         histories.append(unsuper_hist)
         parameter_comb.append([alpha, beta, theta])
-        ari_vals = []
-        acc_vals = []
+        performace_measures = {
+                n: [] for n in non_gd_names
+                }
+        performace_measures[adjusted_rand_score.__name__] = []
+        performace_measures["accuracy"] = []
+        performace_measures["parameters"] = [alpha, beta, theta]
+
         for j, pred in enumerate(pl.prob_log):
+            latent = pl.latent_log[j]
             clf_pred = pred.argmax(1)
-            ari_vals.append(adjusted_rand_score(y_lab, clf_pred))
-            acc_vals.append(acc(y_lab, clf_pred))
-        perf_list.append([max(ari_vals), max(acc_vals), parameter_comb[-1]])
-        if max(ari_vals) > max_ari:
-            print(max(ari_vals), max(acc_vals), parameter_comb[-1])
-
-        fn = "../results/mixae/"+data+"/randomsearch_param.txt"
+            performace_measures[adjusted_rand_score.__name__].append(
+                    adjusted_rand_score(y_lab, clf_pred)
+                    )
+            performace_measures["accuracy"].append(
+                    acc(y_lab, clf_pred)
+                    )
+            for measure, name in zip(non_gd_measures, non_gd_names):
+                performace_measures[name].append(measure(latent, clf_pred))
         with open(fn, "a+") as fo:
-            fo.write("ari, acc, alpha, beta, theta \n")
-            for p in perf_list:
-                fo.write("{},".format(p[0]))
-                fo.write("{},".format(p[1]))
-                for param in p[2]:
-                    fo.write("{},".format(param))
-                fo.write("\n")
+            json.dump(fo, performace_measures)
+            fo.write(",\n")
 
-        if max(ari_vals) < max_ari and i == 0:
+        if max(performace_measures[adjusted_rand_score.__name__]) < max_ari and i == 0:
             break
+

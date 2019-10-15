@@ -22,18 +22,23 @@ class entropy_callback(tf.keras.callbacks.Callback):
         return c1, c2, c3
 
 class probabilities_log(tf.keras.callbacks.Callback):
-    def __init__(self, model, nclasses, data):
+    def __init__(self, model, nclasses, latent_dim, data):
         self.prob_log = []
+        self.latent_log = []
         self.data = data
         self.nclasses = nclasses
+        self.latent_dim = latent_dim
 
     def on_epoch_end(self, epoch, logs={}):
         bm = BatchManager(self.data.shape[0], 100, shuffle=False)
         prob_all = np.zeros((self.data.shape[0], self.nclasses))
+        latent_all = np.zeros((self.data.shape[0], self.self.latent_dim))
         for batch in bm:
-            probs = self.model.predict_on_batch(self.data[batch])
+            latent, probs, _ = self.model.predict_on_batch(self.data[batch])
             prob_all[batch] = probs[1]
+            latent_all[batch] = latent[1]
         self.prob_log.append(prob_all)
+        self.latent_log.append(latent_all)
 
 
 class mixae_model:
